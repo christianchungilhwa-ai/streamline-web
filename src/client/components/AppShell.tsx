@@ -3,7 +3,7 @@ import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
-import { BookOpen, Sun, Moon } from "lucide-react";
+import { BookOpen, NotebookText, Share2, Globe, Sun, Moon } from "lucide-react";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login with
@@ -48,6 +48,9 @@ export function AppShell() {
 
   const onLibrary =
     location.pathname === "/lectures" || location.pathname === "/";
+  const onStudyguides = location.pathname === "/studyguides";
+  const onShared = location.pathname === "/shared";
+  const onCommunity = location.pathname === "/community";
 
   return (
     <div className="flex h-full">
@@ -82,10 +85,21 @@ export function AppShell() {
         {/* Nav rows — hand-rolled to match Claraity's `.nav-item`:
             soft hover, accent-tinted active row, brand-colored text/icon
             when active. Creating a new lecture lives on the Library
-            page's header button (no sidebar shortcut needed). */}
+            page's header button (no sidebar shortcut needed).
+            Studyguides / Shared / Community are routed to ComingSoonPage
+            stubs until their backends land. */}
         <nav className="flex-1 space-y-1 px-2 py-2">
           <NavRow to="/lectures" icon={<BookOpen className="h-4 w-4" />} active={onLibrary}>
             My Library
+          </NavRow>
+          <NavRow to="/studyguides" icon={<NotebookText className="h-4 w-4" />} active={onStudyguides}>
+            My Studyguides
+          </NavRow>
+          <NavRow to="/shared" icon={<Share2 className="h-4 w-4" />} active={onShared}>
+            Shared with me
+          </NavRow>
+          <NavRow to="/community" icon={<Globe className="h-4 w-4" />} active={onCommunity}>
+            Community
           </NavRow>
         </nav>
 
