@@ -180,11 +180,32 @@ export function AppShell() {
   );
 }
 
-/** Circular initials avatar. Sky-tinted (brand) with the user's first
- *  initial — fallback when there's no profile picture (SessionUser
- *  doesn't carry one today). */
+/** Circular avatar. Shows the user's Google profile photo (same value
+ *  Claraity-web's /api/auth/user returns) when present; falls back to a
+ *  sky-tinted initial when there's no photo or the image fails to load.
+ *
+ *  `referrerPolicy="no-referrer"` is required — Google's
+ *  lh3.googleusercontent.com 403s photo requests that carry a referrer. */
 function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
+  const [imgError, setImgError] = useState(false);
   const initial = (user.firstName?.[0] || user.email?.[0] || "?").toUpperCase();
+  const showImg = !!user.profilePicture && !imgError;
+
+  if (showImg) {
+    return (
+      <img
+        src={user.profilePicture!}
+        alt={user.email}
+        title={user.email}
+        referrerPolicy="no-referrer"
+        onError={() => setImgError(true)}
+        className="shrink-0 select-none rounded-full object-cover"
+        style={{ width: size, height: size }}
+        draggable={false}
+      />
+    );
+  }
+
   return (
     <div
       className="flex shrink-0 select-none items-center justify-center rounded-full bg-primary/20 font-semibold text-primary"

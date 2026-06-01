@@ -104,6 +104,9 @@ export interface SessionUser {
   email: string;
   firstName?: string;
   lastName?: string;
+  /** Google profile photo URL (or null). Same value Claraity-web's
+   *  /api/auth/user returns, so the avatar matches the main app. */
+  profilePicture?: string | null;
 }
 
 /** Hits Claraity-web's existing /api/auth/user. Returns null if not signed in. */
