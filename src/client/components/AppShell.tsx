@@ -3,29 +3,17 @@ import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
-import {
-  BookOpen,
-  NotebookText,
-  Users,
-  Sun,
-  Moon,
-  PanelLeft,
-} from "lucide-react";
+import { BookOpen, NotebookText, Users, Sun, Moon, PanelLeft } from "lucide-react";
 import { CommunityIcon } from "@/lib/icons";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
- *  shared session cookie. Anonymous → redirect to claraity.app/login with
- *  ?returnTo back to wherever they were headed. Authed → render the
- *  sidebar + the matched route via <Outlet>.
+ *  shared session cookie. Anonymous → redirect to claraity.app/login.
  *
- *  Sidebar layout mirrors Claraity-web's:
- *   - Header: STREAMLINE wordmark (left) + user avatar (right)
- *   - Breathing room, then the nav rows
- *   - Footer: theme toggle + show/hide-sidebar (collapse) toggle, side
- *     by side. No account/email row.
- *
- *  Collapse shrinks the sidebar to an icon rail (desktop only; on mobile
- *  the whole sidebar is hidden under `md`).
+ *  The sidebar is a 1:1 translation of Claraity-web's `.sidebar` CSS box
+ *  model (padding 16/12, 4px child gap, 220px → 56px collapsed, header
+ *  padding 12/8/20, nav gap 2px + 100px top, nav-item padding 10/12 with
+ *  hover scale, footer column with theme-toggle + collapse-btn). Values
+ *  are taken verbatim from Claraity's index.css so the two apps match.
  */
 export function AppShell() {
   const location = useLocation();
@@ -70,105 +58,104 @@ export function AppShell() {
 
   return (
     <div className="flex h-full">
+      {/* .sidebar — padding 16px 12px, gap 4px, 220px (56px collapsed). */}
       <aside
         className={cn(
-          "hidden shrink-0 flex-col md:flex",
+          "hidden shrink-0 flex-col gap-1 md:flex",
           "border-r border-border bg-card/85 backdrop-blur-xl",
-          "transition-[width] duration-200",
-          collapsed ? "w-[68px]" : "w-[220px]",
+          "transition-[width,min-width] duration-200",
+          collapsed
+            ? "w-14 min-w-14 items-center px-1.5 py-4"
+            : "w-[220px] min-w-[220px] px-3 py-4",
         )}
       >
-        {/* Header — wordmark + avatar. When collapsed, just the avatar,
-            centered. Padding matches Claraity's .sidebar-header
-            (12px top / 8px sides / 20px bottom). */}
+        {/* .sidebar-header — padding 12px 8px 20px, space-between. */}
         <div
           className={cn(
-            "flex items-center px-2 pb-5 pt-3",
-            collapsed ? "justify-center" : "justify-between",
+            "flex items-center pb-5 pt-3",
+            collapsed ? "justify-center px-0" : "justify-between px-2",
           )}
         >
           {!collapsed && (
             <Link
               to="/lectures"
-              className="flex items-center transition-opacity hover:opacity-80"
+              className="flex items-center overflow-hidden transition-opacity hover:opacity-80"
             >
+              {/* .sidebar-logo img — height 25px. */}
               <img
                 src="/Streamline_logo.png"
                 alt="Streamline"
-                className="h-5 w-auto select-none brightness-0 dark:brightness-100"
+                className="h-[25px] w-auto select-none brightness-0 dark:brightness-100"
                 draggable={false}
               />
             </Link>
           )}
-          <Avatar user={user} />
+          <Avatar user={user} size={collapsed ? 24 : 28} />
         </div>
 
-        {/* Breathing room before the first tab. Matches Claraity's
-            .sidebar-nav padding-top: 100px. */}
-        <nav className="flex-1 space-y-1 px-2 pt-[100px]">
+        {/* .sidebar-nav — gap 2px, padding-top 100px. */}
+        <nav className="flex flex-1 flex-col gap-0.5 pt-[100px]">
           <NavRow
             to="/lectures"
-            icon={<BookOpen className="h-4 w-4" />}
+            icon={<BookOpen className="h-[18px] w-[18px]" />}
             label="My Library"
             active={onLibrary}
             collapsed={collapsed}
           />
           <NavRow
             to="/lectures?filter=shared"
-            icon={<Users className="h-4 w-4" />}
+            icon={<Users className="h-[18px] w-[18px]" />}
             label="Shared with me"
             active={onShared}
             collapsed={collapsed}
           />
           <NavRow
             to="/studyguides"
-            icon={<NotebookText className="h-4 w-4" />}
+            icon={<NotebookText className="h-[18px] w-[18px]" />}
             label="My Studyguides"
             active={onStudyguides}
             collapsed={collapsed}
           />
           <NavRow
             to="/community"
-            icon={<CommunityIcon className="h-4 w-4" />}
+            icon={<CommunityIcon className="h-[18px] w-[18px]" />}
             label="Community"
             active={onCommunity}
             collapsed={collapsed}
           />
         </nav>
 
-        {/* Footer — theme toggle + collapse toggle. */}
-        <div className="border-t border-border p-2">
-          <div
-            className={cn(
-              "flex items-center gap-1",
-              collapsed ? "flex-col" : "justify-between",
-            )}
-          >
+        {/* .sidebar-footer — column, padding 8px, margin-top 8px, border-top. */}
+        <div className="mt-2 flex w-full flex-col items-center border-t border-border p-2">
+          {collapsed && (
+            <CollapseButton
+              onClick={() => setCollapsed(false)}
+              title="Expand sidebar"
+              className="mb-2"
+            />
+          )}
+          <div className="flex w-full items-center justify-between">
+            {/* .theme-toggle — gap 6px, padding 6px 10px, radius-sm. */}
             <button
               type="button"
               onClick={toggleTheme}
               title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               className={cn(
-                "flex h-9 items-center gap-2 rounded-lg text-sm font-medium transition-colors",
-                "text-muted-foreground hover:bg-accent hover:text-foreground",
-                collapsed ? "w-9 justify-center" : "px-3",
+                "flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                collapsed && "justify-center",
               )}
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? (
+                <Sun className="h-[15px] w-[15px]" />
+              ) : (
+                <Moon className="h-[15px] w-[15px]" />
+              )}
               {!collapsed && <span>{theme === "dark" ? "Light" : "Dark"}</span>}
             </button>
 
-            <button
-              type="button"
-              onClick={() => setCollapsed((v) => !v)}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {/* Plain panel icon (rounded rect + vertical divider), same
-                  glyph for both states — matches Claraity's collapse btn
-                  exactly (lucide PanelLeft == Claraity's inline SVG). */}
-              <PanelLeft className="h-4 w-4" />
-            </button>
+            {!collapsed && (
+              <CollapseButton onClick={() => setCollapsed(true)} title="Collapse sidebar" />
+            )}
           </div>
         </div>
       </aside>
@@ -180,12 +167,34 @@ export function AppShell() {
   );
 }
 
-/** Circular avatar. Shows the user's Google profile photo (same value
- *  Claraity-web's /api/auth/user returns) when present; falls back to a
- *  sky-tinted initial when there's no photo or the image fails to load.
- *
- *  `referrerPolicy="no-referrer"` is required — Google's
- *  lh3.googleusercontent.com 403s photo requests that carry a referrer. */
+/** .sidebar-collapse-btn — 28×28, radius 6px, plain panel glyph (matches
+ *  Claraity exactly; same icon for expand + collapse). */
+function CollapseButton({
+  onClick,
+  title,
+  className,
+}: {
+  onClick: () => void;
+  title: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={cn(
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        className,
+      )}
+    >
+      <PanelLeft className="h-4 w-4" />
+    </button>
+  );
+}
+
+/** Circular avatar — real profile photo (matches Claraity) with a
+ *  sky-tinted initial fallback. */
 function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
   const [imgError, setImgError] = useState(false);
   const initial = (user.firstName?.[0] || user.email?.[0] || "?").toUpperCase();
@@ -199,7 +208,7 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
         title={user.email}
         referrerPolicy="no-referrer"
         onError={() => setImgError(true)}
-        className="shrink-0 select-none rounded-full object-cover"
+        className="shrink-0 select-none rounded-full object-cover transition-[opacity,transform] hover:scale-105 hover:opacity-85"
         style={{ width: size, height: size }}
         draggable={false}
       />
@@ -208,7 +217,7 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
 
   return (
     <div
-      className="flex shrink-0 select-none items-center justify-center rounded-full bg-primary/20 font-semibold text-primary"
+      className="flex shrink-0 select-none items-center justify-center rounded-full bg-primary/20 font-semibold text-primary transition-[opacity,transform] hover:scale-105 hover:opacity-85"
       style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
       title={user.email}
       aria-label={user.email}
@@ -218,9 +227,9 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
   );
 }
 
-/** A single sidebar nav row. Idle / hover / active states. When the
- *  sidebar is collapsed, renders icon-only (centered) with the label as
- *  a native tooltip. */
+/** .nav-item — gap 10px, padding 10px 12px, radius-md, font 14/500,
+ *  hover scale 1.02, active = accent text + 600 + tinted bg. Collapsed
+ *  → centered icon-only with 10px padding + label tooltip. */
 function NavRow({
   to,
   icon,
@@ -239,14 +248,15 @@ function NavRow({
       to={to}
       title={collapsed ? label : undefined}
       className={cn(
-        "flex h-9 items-center rounded-lg text-sm font-medium transition-colors",
-        collapsed ? "w-9 justify-center" : "gap-3 px-3",
+        "flex items-center gap-2.5 rounded-md text-sm font-medium transition-all",
+        collapsed ? "justify-center p-2.5" : "px-3 py-2.5",
         active
-          ? "bg-primary/15 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          ? "bg-primary/15 font-semibold text-primary"
+          : "text-muted-foreground hover:scale-[1.02] hover:bg-accent hover:text-foreground",
       )}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+      {/* .nav-icon — width 24px, centered. */}
+      <span className="flex w-6 shrink-0 items-center justify-center">
         {icon}
       </span>
       {!collapsed && <span className="truncate">{label}</span>}
