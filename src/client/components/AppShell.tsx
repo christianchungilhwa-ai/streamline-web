@@ -9,8 +9,7 @@ import {
   Users,
   Sun,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeft,
 } from "lucide-react";
 import { CommunityIcon } from "@/lib/icons";
 
@@ -165,11 +164,10 @@ export function AppShell() {
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              {collapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
+              {/* Plain panel icon (rounded rect + vertical divider), same
+                  glyph for both states — matches Claraity's collapse btn
+                  exactly (lucide PanelLeft == Claraity's inline SVG). */}
+              <PanelLeft className="h-4 w-4" />
             </button>
           </div>
         </div>
