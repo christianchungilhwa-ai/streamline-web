@@ -3,7 +3,7 @@ import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
-import { Plus, BookOpen, Sun, Moon } from "lucide-react";
+import { BookOpen, Sun, Moon } from "lucide-react";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login with
@@ -48,7 +48,6 @@ export function AppShell() {
 
   const onLibrary =
     location.pathname === "/lectures" || location.pathname === "/";
-  const onNew = location.pathname === "/lectures/new";
 
   return (
     <div className="flex h-full">
@@ -82,13 +81,11 @@ export function AppShell() {
 
         {/* Nav rows — hand-rolled to match Claraity's `.nav-item`:
             soft hover, accent-tinted active row, brand-colored text/icon
-            when active. */}
+            when active. Creating a new lecture lives on the Library
+            page's header button (no sidebar shortcut needed). */}
         <nav className="flex-1 space-y-1 px-2 py-2">
           <NavRow to="/lectures" icon={<BookOpen className="h-4 w-4" />} active={onLibrary}>
             Library
-          </NavRow>
-          <NavRow to="/lectures/new" icon={<Plus className="h-4 w-4" />} active={onNew}>
-            New lecture
           </NavRow>
         </nav>
 
