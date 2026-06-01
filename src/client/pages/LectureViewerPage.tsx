@@ -100,7 +100,7 @@ export function LectureViewerPage() {
     return (
       <div className="mx-auto max-w-3xl p-6 md:p-10">
         <BackLink />
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       </div>
@@ -124,9 +124,9 @@ export function LectureViewerPage() {
     return (
       <div className="mx-auto max-w-3xl p-6 md:p-10">
         <BackLink />
-        <h1 className="mb-4 text-2xl font-semibold tracking-tight">{detail.lecture.name}</h1>
-        <div className="rounded-lg border bg-card p-6">
-          <div className="text-sm font-medium capitalize">{detail.lecture.status}</div>
+        <h1 className="page-title mb-6">{detail.lecture.name}</h1>
+        <div className="card-surface p-6">
+          <div className="text-sm font-semibold capitalize text-foreground">{detail.lecture.status}</div>
           {status?.step && (
             <div className="mt-1 text-xs text-muted-foreground">
               step: {status.step}
@@ -155,7 +155,7 @@ export function LectureViewerPage() {
   // ---- Completed: rich viewer ----------------------------------------------
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b bg-card/40 px-4 py-3 backdrop-blur md:px-6">
+      <header className="flex items-center justify-between gap-4 border-b border-border bg-card/85 px-4 py-3 backdrop-blur-xl md:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <Link to="/lectures">
             <Button variant="ghost" size="sm">

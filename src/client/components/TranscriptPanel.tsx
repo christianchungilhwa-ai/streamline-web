@@ -65,8 +65,11 @@ export function TranscriptPanel({ note, activeWord, onSeekTo, className }: Trans
                   onClick={() => onSeekTo?.(w.start)}
                   className={cn(
                     "cursor-pointer rounded px-0.5 transition-colors",
+                    // Active word — sky-blue tint, not full saturation,
+                    // so the reading flow isn't broken by a loud
+                    // highlight on every spoken word.
                     isActive
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-primary/25 text-primary font-medium"
                       : "hover:bg-accent hover:text-accent-foreground",
                   )}
                 >

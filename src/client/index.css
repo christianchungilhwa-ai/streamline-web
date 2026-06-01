@@ -2,9 +2,18 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn/ui new-york theme — neutral base color, dark mode via .dark class
-   on <html>. Tailwind v4 uses @theme inline to expose CSS variables to
-   utility classes. */
+/* ---------------------------------------------------------------
+   Streamline-Web theme — matches Claraity-web's design vocabulary
+   (iOS/macOS-feeling: SF Pro stack, soft shadows, generous radii,
+   backdrop-blur surfaces) with **sky-blue** as the brand accent
+   instead of Claraity's orange.
+
+   Approach: keep shadcn's semantic-token names (`--primary`,
+   `--card`, etc.) so existing shadcn components keep working, but
+   override the values to Claraity's palette. Tailwind v4 then
+   exposes them as utility colors via `@theme inline`.
+   --------------------------------------------------------------- */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -28,57 +37,97 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
 }
 
+/* ---- Light mode ----
+   Mirrors Claraity's `:root` block. Sky-blue (#38bdf8) replaces
+   Claraity's orange (#ff8b25) as the brand color. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --background: #faf8f9;            /* bg-primary */
+  --foreground: #1a1a1a;            /* text-primary */
+  --card: #ffffff;                  /* bg-card */
+  --card-foreground: #1a1a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1a;
+  --primary: #38bdf8;               /* sky-400 — brand */
+  --primary-foreground: #ffffff;
+  --secondary: #f5f3f4;             /* bg-tertiary */
+  --secondary-foreground: #1a1a1a;
+  --muted: #f5f3f4;
+  --muted-foreground: #6b7280;      /* text-secondary */
+  --accent: rgba(0, 0, 0, 0.04);    /* bg-hover */
+  --accent-foreground: #1a1a1a;
+  --destructive: #ff3b30;           /* Claraity --red */
+  --destructive-foreground: #ffffff;
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.08);
+  --ring: #38bdf8;                  /* focus ring follows brand */
+  --radius: 0.75rem;                /* 12px — matches Claraity --radius-md */
 }
 
+/* ---- Dark mode ----
+   Streamline-Web currently locks to dark (`.dark` on <html>).
+   Light tokens above exist so a toggle can ship later. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: #0a0a0f;
+  --foreground: #f0f0f0;
+  --card: #1c1c22;
+  --card-foreground: #f0f0f0;
+  --popover: #1c1c22;
+  --popover-foreground: #f0f0f0;
+  --primary: #38bdf8;
+  --primary-foreground: #0a0a0f;    /* dark text on bright sky button */
+  --secondary: #1c1c22;
+  --secondary-foreground: #f0f0f0;
+  --muted: #1c1c22;
+  --muted-foreground: #8a8a91;
+  --accent: rgba(255, 255, 255, 0.06);
+  --accent-foreground: #f0f0f0;
+  --destructive: #ff3b30;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.10);
+  --ring: #38bdf8;
 }
 
+/* Default border color so unspecified borders pick up the theme. */
 * {
   border-color: var(--border);
 }
 
+/* Apply the Apple-system font stack globally. */
 html, body, #root {
   height: 100%;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- Reusable Claraity-style utilities ----
+   Tailwind v4's @utility directive lets us name a few patterns
+   that recur enough to deserve a class. Keep this list short —
+   most styling stays inline-Tailwind. */
+
+@utility page-title {
+  font-size: 2.25rem;     /* 36px — matches Claraity .page-title */
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+@utility page-subtitle {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+@utility card-surface {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 6px); /* radius-xl */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
