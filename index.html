@@ -1,12 +1,32 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#faf8f9" media="(prefers-color-scheme: light)" />
     <title>Streamline</title>
     <meta name="description" content="Lecture processing — upload a PDF + video, get an aligned study guide." />
+    <!--
+      Inline theme bootstrap. Runs synchronously before React mounts so the
+      saved theme is applied to <html> before first paint — no flash-of-
+      wrong-theme on hard reload. Mirrors the useTheme hook's logic; keep
+      them in sync if either changes.
+    -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("streamline-theme");
+          // Default to dark unless the user has explicitly opted into light.
+          if (saved !== "light") {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
     <div id="root"></div>

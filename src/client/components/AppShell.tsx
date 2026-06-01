@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Plus, BookOpen } from "lucide-react";
+import { useTheme } from "@/lib/useTheme";
+import { Plus, BookOpen, Sun, Moon } from "lucide-react";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login with
@@ -16,6 +17,7 @@ import { Plus, BookOpen } from "lucide-react";
 export function AppShell() {
   const location = useLocation();
   const [user, setUser] = useState<SessionUser | null | "loading">("loading");
+  const { theme, toggle: toggleTheme } = useTheme();
 
   useEffect(() => {
     let alive = true;
@@ -60,9 +62,12 @@ export function AppShell() {
         )}
       >
         {/* Brand mark — STREAMLINE wordmark image. Lives in public/
-            so Vite copies it verbatim to dist/. Thin white outline on
-            transparent, so it sits cleanly on the sidebar's
-            backdrop-blur surface in dark mode. */}
+            so Vite copies it verbatim to dist/. The source PNG is a
+            thin white outline on transparent (great in dark mode).
+            In light mode we apply `brightness-0` to invert the white
+            pixels to black, keeping the same shape on a pale
+            background. The `dark:brightness-100` resets it back when
+            the dark class is on <html>. */}
         <Link
           to="/lectures"
           className="flex h-14 items-center px-4 transition-opacity hover:opacity-80"
@@ -70,7 +75,7 @@ export function AppShell() {
           <img
             src="/Streamline_logo.png"
             alt="Streamline"
-            className="h-5 w-auto select-none"
+            className="h-5 w-auto select-none brightness-0 dark:brightness-100"
             draggable={false}
           />
         </Link>
@@ -87,10 +92,27 @@ export function AppShell() {
           </NavRow>
         </nav>
 
-        {/* User footer — divider + email. Matches Claraity sidebar's
-            bottom block. */}
-        <div className="border-t border-border px-3 py-3">
-          <div className="truncate text-xs text-muted-foreground">
+        {/* Footer — theme toggle + signed-in email. Matches Claraity
+            sidebar's bottom block (theme button just above account
+            row). The toggle label follows Claraity convention:
+            shows the DESTINATION, not the current state — so "Light"
+            with a Sun icon means "click to go light". */}
+        <div className="space-y-1 border-t border-border px-2 py-2">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            className={cn(
+              "flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors",
+              "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </span>
+            <span>{theme === "dark" ? "Light" : "Dark"}</span>
+          </button>
+          <div className="truncate px-3 pb-1 pt-2 text-xs text-muted-foreground">
             {user.email}
           </div>
         </div>
