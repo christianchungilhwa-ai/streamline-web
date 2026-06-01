@@ -4,7 +4,8 @@ import { UploadPage } from "./pages/UploadPage";
 import { LectureViewerPage } from "./pages/LectureViewerPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { AppShell } from "./components/AppShell";
-import { NotebookText, Users, Globe } from "lucide-react";
+import { NotebookText, Users } from "lucide-react";
+import { CommunityIcon } from "./lib/icons";
 
 /** Top-level router. All routes are session-gated by the AppShell, which
  *  redirects anonymous visitors to claraity.app/login (the canonical
@@ -49,7 +50,7 @@ export default function App() {
             <ComingSoonPage
               title="Community"
               description="Public lectures and study guides shared by the wider Streamline community — browse, save, and learn from materials posted by other users."
-              icon={<Globe className="h-7 w-7" />}
+              icon={<CommunityIcon className="h-7 w-7" />}
             />
           }
         />
