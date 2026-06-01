@@ -67,7 +67,7 @@ export function LecturesPage() {
           <Link to="/lectures/new" className="mt-4 inline-block">
             <Button>
               <Plus />
-              New lecture
+              New Project
             </Button>
           </Link>
         </div>
