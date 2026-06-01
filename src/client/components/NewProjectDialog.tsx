@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { createLecture, startLecture, uploadFile, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Loader2, Upload, FileText, Video } from "lucide-react";
+import { Loader2, FileText, Video } from "lucide-react";
 
 type Phase = "idle" | "creating" | "uploading" | "starting" | "done" | "error";
 
@@ -150,7 +150,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
               Cancel
             </Button>
             <Button type="submit" disabled={submitDisabled}>
-              {busy ? <Loader2 className="animate-spin" /> : <Upload />}
+              {busy && <Loader2 className="animate-spin" />}
               {phaseLabel(phase)}
             </Button>
           </div>
