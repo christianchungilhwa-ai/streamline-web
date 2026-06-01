@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Sparkles, Plus, BookOpen } from "lucide-react";
+import { Plus, BookOpen } from "lucide-react";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login with
@@ -59,16 +59,21 @@ export function AppShell() {
           "bg-card/85 backdrop-blur-xl",
         )}
       >
-        {/* Brand mark — Sparkles icon + "Streamline" wordmark.
-            Same role as Claraity's logo image in their sidebar header. */}
-        <div className="flex h-14 items-center gap-2 px-4">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
-            <Sparkles className="h-4 w-4" />
-          </span>
-          <span className="text-base font-semibold tracking-tight">
-            Streamline
-          </span>
-        </div>
+        {/* Brand mark — STREAMLINE wordmark image. Lives in public/
+            so Vite copies it verbatim to dist/. Thin white outline on
+            transparent, so it sits cleanly on the sidebar's
+            backdrop-blur surface in dark mode. */}
+        <Link
+          to="/lectures"
+          className="flex h-14 items-center px-4 transition-opacity hover:opacity-80"
+        >
+          <img
+            src="/Streamline_logo.png"
+            alt="Streamline"
+            className="h-5 w-auto select-none"
+            draggable={false}
+          />
+        </Link>
 
         {/* Nav rows — hand-rolled to match Claraity's `.nav-item`:
             soft hover, accent-tinted active row, brand-colored text/icon
