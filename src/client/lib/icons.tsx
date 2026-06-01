@@ -22,9 +22,9 @@ export function CommunityIcon(props: SVGProps<SVGSVGElement>) {
       xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
-      <circle cx="12" cy="5.5" r="2.6" />
-      <circle cx="5.5" cy="17.5" r="2.6" />
-      <circle cx="18.5" cy="17.5" r="2.6" />
+      <circle cx="12" cy="8" r="4" />
+      <circle cx="7.5" cy="16" r="4" />
+      <circle cx="16.5" cy="16" r="4" />
     </svg>
   );
 }
