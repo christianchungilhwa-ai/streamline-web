@@ -81,11 +81,10 @@ export function AppShell() {
               to="/lectures"
               className="flex items-center overflow-hidden transition-opacity hover:opacity-80"
             >
-              {/* .sidebar-logo img — height 25px. */}
               <img
                 src="/Streamline_logo.png"
                 alt="Streamline"
-                className="h-[25px] w-auto select-none brightness-0 dark:brightness-100"
+                className="h-5 w-auto select-none brightness-0 dark:brightness-100"
                 draggable={false}
               />
             </Link>
