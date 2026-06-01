@@ -79,10 +79,11 @@ export function AppShell() {
         )}
       >
         {/* Header — wordmark + avatar. When collapsed, just the avatar,
-            centered. */}
+            centered. Padding matches Claraity's .sidebar-header
+            (12px top / 8px sides / 20px bottom). */}
         <div
           className={cn(
-            "flex h-14 items-center px-3",
+            "flex items-center px-2 pb-5 pt-3",
             collapsed ? "justify-center" : "justify-between",
           )}
         >
@@ -102,10 +103,9 @@ export function AppShell() {
           <Avatar user={user} />
         </div>
 
-        {/* Breathing room between the header and the first nav row. */}
-        <div className="h-3" />
-
-        <nav className="flex-1 space-y-1 px-2">
+        {/* Breathing room before the first tab. Matches Claraity's
+            .sidebar-nav padding-top: 100px. */}
+        <nav className="flex-1 space-y-1 px-2 pt-[100px]">
           <NavRow
             to="/lectures"
             icon={<BookOpen className="h-4 w-4" />}
