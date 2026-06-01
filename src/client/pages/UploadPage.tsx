@@ -18,7 +18,7 @@ type Phase = "idle" | "creating" | "uploading" | "starting" | "done" | "error";
  *  title, a single Project Name input, then two big dashed cards
  *  side-by-side for the two file slots, centered Cancel + Continue
  *  at the bottom. Each card gets its own accent: sky-blue (brand)
- *  for the video, amber for the PDF — matches the iOS mockup so
+ *  for the video, red for the PDF — matches the iOS mockup so
  *  the slots are instantly distinguishable. */
 export function UploadPage() {
   const navigate = useNavigate();
@@ -98,7 +98,7 @@ export function UploadPage() {
             disabled={busy}
           />
           <FileSelectCard
-            accent="amber"
+            accent="red"
             title="Slide Deck (PDF)"
             icon={<FileText className="h-11 w-11" strokeWidth={2.2} />}
             accept="application/pdf"
@@ -155,7 +155,7 @@ function phaseLabel(p: Phase): string {
 }
 
 /** A single big file-select card. Two accents only: `"sky"` (brand,
- *  for video) and `"amber"` (for PDF). Kept as a closed enum so
+ *  for video) and `"red"` (for PDF). Kept as a closed enum so
  *  Tailwind's JIT compiler can statically resolve the class strings.
  *
  *  Card states:
@@ -173,7 +173,7 @@ function FileSelectCard({
   progress,
   disabled,
 }: {
-  accent: "sky" | "amber";
+  accent: "sky" | "red";
   title: string;
   icon: React.ReactNode;
   accept: string;
@@ -186,11 +186,11 @@ function FileSelectCard({
   const cardTone =
     accent === "sky"
       ? "border-primary/50 bg-primary/[0.06] hover:border-primary/70 hover:bg-primary/10"
-      : "border-amber-500/50 bg-amber-500/[0.06] hover:border-amber-500/70 hover:bg-amber-500/10";
+      : "border-red-500/50 bg-red-500/[0.06] hover:border-red-500/70 hover:bg-red-500/10";
   const iconTone =
-    accent === "sky" ? "text-primary" : "text-amber-500";
+    accent === "sky" ? "text-primary" : "text-red-500";
   const progressTone =
-    accent === "sky" ? "bg-primary" : "bg-amber-500";
+    accent === "sky" ? "bg-primary" : "bg-red-500";
 
   return (
     <label
