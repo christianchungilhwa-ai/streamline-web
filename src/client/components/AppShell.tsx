@@ -85,7 +85,7 @@ export function AppShell() {
             page's header button (no sidebar shortcut needed). */}
         <nav className="flex-1 space-y-1 px-2 py-2">
           <NavRow to="/lectures" icon={<BookOpen className="h-4 w-4" />} active={onLibrary}>
-            Library
+            My Library
           </NavRow>
         </nav>
 
