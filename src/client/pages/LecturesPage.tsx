@@ -124,10 +124,6 @@ export function LecturesPage() {
       <header className="mb-6 flex items-end justify-between gap-4">
         <div className="min-w-0">
           <h1 className="page-title">My Library</h1>
-          <p className="page-subtitle">
-            Upload a PDF + recording and Streamline aligns the slides to the
-            transcript.
-          </p>
         </div>
         <Button onClick={() => setDialogOpen(true)} className="shrink-0">
           <Plus />
