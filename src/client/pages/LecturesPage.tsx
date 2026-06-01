@@ -55,12 +55,24 @@ export function LecturesPage() {
   const [lectures, setLectures] = useState<Lecture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Toolbar state — local, not URL-synced for now.
-  const [filter, setFilter] = useState<Filter>("all");
+  // Filter is URL-synced via `?filter=mine|shared` so the sidebar's
+  // "Shared with me" entry can deep-link straight into this view with
+  // the right chip already selected. View / sort / search stay local
+  // because they don't have a sidebar entry that drives them.
   const [view, setView] = useState<View>("grid");
   const [sort, setSort] = useState<Sort>("recent");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const filterParam = searchParams.get("filter");
+  const filter: Filter =
+    filterParam === "mine" || filterParam === "shared" ? filterParam : "all";
+  const setFilter = (f: Filter) => {
+    const next = new URLSearchParams(searchParams);
+    if (f === "all") next.delete("filter");
+    else next.set("filter", f);
+    setSearchParams(next, { replace: true });
+  };
 
   const dialogOpen = searchParams.get("new") === "1";
   const setDialogOpen = (open: boolean) => {
@@ -152,29 +164,38 @@ export function LecturesPage() {
         </div>
       )}
 
-      {displayed && displayed.length === 0 && (lectures?.length ?? 0) === 0 && (
-        <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
-          <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
-          <h2 className="mt-4 text-lg font-medium">No lectures yet</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Upload your first PDF + recording to get started.
-          </p>
-          <Button onClick={() => setDialogOpen(true)} className="mt-4">
-            <Plus />
-            New Project
-          </Button>
-        </div>
-      )}
-
-      {displayed &&
-        displayed.length === 0 &&
-        (lectures?.length ?? 0) > 0 && (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
-            {filter === "shared"
-              ? "Nothing has been shared with you yet."
-              : "No lectures match your search."}
+      {/* Empty states — three flavors:
+          (1) Shared filter is active and there's nothing shared yet
+          (2) User has zero lectures at all (first-run)
+          (3) Lectures exist but the search/filter combo returned none */}
+      {displayed && displayed.length === 0 && (
+        filter === "shared" ? (
+          <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
+            <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
+            <h2 className="mt-4 text-lg font-medium">Nothing shared with you yet</h2>
+            <p className="mt-1 max-w-md mx-auto text-sm text-muted-foreground">
+              Lectures and study guides shared by classmates or instructors
+              will appear here.
+            </p>
           </div>
-        )}
+        ) : (lectures?.length ?? 0) === 0 ? (
+          <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
+            <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
+            <h2 className="mt-4 text-lg font-medium">No lectures yet</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Upload your first PDF + recording to get started.
+            </p>
+            <Button onClick={() => setDialogOpen(true)} className="mt-4">
+              <Plus />
+              New Project
+            </Button>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
+            No lectures match your search.
+          </div>
+        )
+      )}
 
       {displayed && displayed.length > 0 && (
         view === "grid" ? (

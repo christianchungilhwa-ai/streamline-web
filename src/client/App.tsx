@@ -3,7 +3,7 @@ import { LecturesPage } from "./pages/LecturesPage";
 import { LectureViewerPage } from "./pages/LectureViewerPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { AppShell } from "./components/AppShell";
-import { NotebookText, Users } from "lucide-react";
+import { NotebookText } from "lucide-react";
 import { CommunityIcon } from "./lib/icons";
 
 /** Top-level router. All routes are session-gated by the AppShell, which
@@ -40,16 +40,10 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/shared"
-          element={
-            <ComingSoonPage
-              title="Shared with me"
-              description="Lectures and study guides shared with you by classmates, study groups, or instructors. You'll see everything that's been sent your way in one place."
-              icon={<Users className="h-7 w-7" />}
-            />
-          }
-        />
+        {/* /shared no longer has its own route — the sidebar "Shared with
+            me" entry deep-links to /lectures?filter=shared, where the
+            filter chip pre-selects that scope and LecturesPage renders
+            an appropriate empty state until shared content lands. */}
         <Route
           path="/community"
           element={

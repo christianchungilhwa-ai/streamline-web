@@ -47,10 +47,15 @@ export function AppShell() {
   }
   if (!user) return null; // redirecting
 
-  const onLibrary =
+  // "My Library" and "Shared with me" both live on /lectures — the
+  // filter chip just changes which scope is active. So active-state
+  // here keys on (pathname is /lectures) + (filter query param).
+  const onLibraryPath =
     location.pathname === "/lectures" || location.pathname === "/";
+  const filterParam = new URLSearchParams(location.search).get("filter");
+  const onLibrary = onLibraryPath && filterParam !== "shared";
+  const onShared = onLibraryPath && filterParam === "shared";
   const onStudyguides = location.pathname === "/studyguides";
-  const onShared = location.pathname === "/shared";
   const onCommunity = location.pathname === "/community";
 
   return (
@@ -96,7 +101,7 @@ export function AppShell() {
           <NavRow to="/studyguides" icon={<NotebookText className="h-4 w-4" />} active={onStudyguides}>
             My Studyguides
           </NavRow>
-          <NavRow to="/shared" icon={<Users className="h-4 w-4" />} active={onShared}>
+          <NavRow to="/lectures?filter=shared" icon={<Users className="h-4 w-4" />} active={onShared}>
             Shared with me
           </NavRow>
           <NavRow to="/community" icon={<CommunityIcon className="h-4 w-4" />} active={onCommunity}>
