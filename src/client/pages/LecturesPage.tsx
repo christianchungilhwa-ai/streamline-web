@@ -1,20 +1,35 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { listLectures, type Lecture } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { Plus, Loader2, FileVideo, Film } from "lucide-react";
 
 /** Lectures library — the landing page. Calls
- *  /api/streamline/lectures and renders a card per row. Polling for
- *  in-flight rows is deferred to a future iteration; for now the
- *  status badge reflects the cached `status` column.
+ *  /api/streamline/lectures and renders a card per row.
  *
- *  Layout mirrors Claraity-web's deck-card grid: 220px min, rounded
- *  corners, hover-lift, sky-blue (brand) accent on status when
- *  completed. */
+ *  Project creation opens as a sheet modal (NewProjectDialog) over
+ *  this page rather than its own route. We sync the modal's open
+ *  state with the URL via `?new=1` so:
+ *
+ *    - Hitting /lectures?new=1 directly opens the modal
+ *    - The legacy /lectures/new route redirects here with ?new=1
+ *    - Closing the modal clears the query param
+ *
+ *  This keeps deep links working while the primary UX is a sheet.
+ */
 export function LecturesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [lectures, setLectures] = useState<Lecture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const dialogOpen = searchParams.get("new") === "1";
+  const setDialogOpen = (open: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (open) next.set("new", "1");
+    else next.delete("new");
+    setSearchParams(next, { replace: true });
+  };
 
   useEffect(() => {
     let alive = true;
@@ -36,12 +51,10 @@ export function LecturesPage() {
             transcript.
           </p>
         </div>
-        <Link to="/lectures/new" className="shrink-0">
-          <Button>
-            <Plus />
-            New lecture
-          </Button>
-        </Link>
+        <Button onClick={() => setDialogOpen(true)} className="shrink-0">
+          <Plus />
+          New Project
+        </Button>
       </header>
 
       {error && (
@@ -64,12 +77,10 @@ export function LecturesPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             Upload your first PDF + recording to get started.
           </p>
-          <Link to="/lectures/new" className="mt-4 inline-block">
-            <Button>
-              <Plus />
-              New Project
-            </Button>
-          </Link>
+          <Button onClick={() => setDialogOpen(true)} className="mt-4">
+            <Plus />
+            New Project
+          </Button>
         </div>
       )}
 
@@ -82,6 +93,8 @@ export function LecturesPage() {
           ))}
         </ul>
       )}
+
+      <NewProjectDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>
   );
 }
@@ -118,12 +131,6 @@ function LectureCard({ lecture }: { lecture: Lecture }) {
 }
 
 function StatusPill({ status }: { status: string }) {
-  // Map server statuses to readable + semantic colors.
-  // - completed → sky-blue (brand) so it reads as "ready"
-  // - processing → blue (in-flight, distinct from completed brand)
-  // - uploading → amber
-  // - failed → destructive
-  // - canceled → muted
   const variants: Record<string, string> = {
     completed: "bg-primary/20 text-primary",
     processing: "bg-blue-500/15 text-blue-600 dark:text-blue-400",

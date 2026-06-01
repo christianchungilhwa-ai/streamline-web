@@ -1,6 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { LecturesPage } from "./pages/LecturesPage";
-import { UploadPage } from "./pages/UploadPage";
 import { LectureViewerPage } from "./pages/LectureViewerPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { AppShell } from "./components/AppShell";
@@ -11,6 +10,10 @@ import { CommunityIcon } from "./lib/icons";
  *  redirects anonymous visitors to claraity.app/login (the canonical
  *  login lives on the main Claraity domain — we share the session).
  *
+ *  /lectures/new is a legacy path — project creation now lives as a
+ *  sheet modal over /lectures. The redirect preserves any bookmarks
+ *  by opening the modal automatically via ?new=1.
+ *
  *  /studyguides, /shared, /community are sidebar destinations whose
  *  backends aren't built yet — the routes exist to reserve the URL
  *  and let the sidebar feel complete; each renders ComingSoonPage. */
@@ -20,7 +23,10 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/lectures" replace />} />
         <Route path="/lectures" element={<LecturesPage />} />
-        <Route path="/lectures/new" element={<UploadPage />} />
+        <Route
+          path="/lectures/new"
+          element={<Navigate to="/lectures?new=1" replace />}
+        />
         <Route path="/lectures/:id" element={<LectureViewerPage />} />
 
         {/* Stubbed destinations — see ComingSoonPage. */}
