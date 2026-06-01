@@ -1,9 +1,9 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { LecturesPage } from "./pages/LecturesPage";
 import { LectureViewerPage } from "./pages/LectureViewerPage";
+import { StudyguidesPage } from "./pages/StudyguidesPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { AppShell } from "./components/AppShell";
-import { NotebookText } from "lucide-react";
 import { CommunityIcon } from "./lib/icons";
 
 /** Top-level router. All routes are session-gated by the AppShell, which
@@ -30,16 +30,7 @@ export default function App() {
         <Route path="/lectures/:id" element={<LectureViewerPage />} />
 
         {/* Stubbed destinations — see ComingSoonPage. */}
-        <Route
-          path="/studyguides"
-          element={
-            <ComingSoonPage
-              title="My Studyguides"
-              description="Saved study guides — distilled notes generated from your lectures, organized by topic so you can revisit the highlights without rewatching the recording."
-              icon={<NotebookText className="h-7 w-7" />}
-            />
-          }
-        />
+        <Route path="/studyguides" element={<StudyguidesPage />} />
         {/* /shared no longer has its own route — the sidebar "Shared with
             me" entry deep-links to /lectures?filter=shared, where the
             filter chip pre-selects that scope and LecturesPage renders

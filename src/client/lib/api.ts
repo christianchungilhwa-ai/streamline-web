@@ -161,6 +161,139 @@ export function deleteLecture(id: string) {
   return request<void>(`/api/streamline/lectures/${id}`, { method: "DELETE" });
 }
 
+// ---- Studyguides ---------------------------------------------------------
+
+export interface StudyguideMeta {
+  model?: string;
+  sectionCount?: number;
+  blueprint?: unknown;
+  generatedAt?: number;
+  slideCount?: number;
+}
+
+export interface StudyguideResponse {
+  jobId?: string;
+  markdown: string;
+  meta: StudyguideMeta | null;
+}
+
+/** One row in the "My Studyguides" listing — a lecture that has a
+ *  generated studyguide. `id` is the lecture/job id (opens the same
+ *  viewer, studyguide tab). */
+export interface StudyguideListItem {
+  id: string;
+  name: string;
+  status: string;
+  thumbnailKey: string | null;
+  createdAt: string;
+  generatedAt: number | null;
+  sectionCount: number | null;
+}
+
+/** List the user's generated studyguides (newest first). */
+export function listStudyguides() {
+  return request<{ studyguides: StudyguideListItem[] }>("/api/streamline/studyguides");
+}
+
+/** Fetch the cached studyguide for a lecture. Returns null if none has
+ *  been generated yet (404 from upstream). */
+export async function getStudyguide(id: string): Promise<StudyguideResponse | null> {
+  try {
+    return await request<StudyguideResponse>(`/api/streamline/lectures/${id}/studyguide`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** SSE event shapes emitted by the generate stream. Mirrors
+ *  streamline-server's `event: phase|section|done|error`. */
+export type StudyguideEvent =
+  | { type: "phase"; name: string; [k: string]: unknown }
+  | { type: "section"; index: number; total: number; markdown: string }
+  | { type: "done"; markdown: string; meta: StudyguideMeta | null }
+  | { type: "error"; message: string };
+
+/**
+ * Trigger studyguide generation and stream progress. The endpoint is a
+ * POST SSE, so we can't use EventSource (GET-only) — we read the
+ * `fetch` response body and parse SSE frames by hand. Resolves when the
+ * stream closes; rejects on a non-2xx open or network error. The server
+ * persists the result regardless of whether we read to the end, so a
+ * later `getStudyguide` returns the cached markdown.
+ */
+export async function generateStudyguide(
+  id: string,
+  onEvent: (ev: StudyguideEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = `${API_BASE}/api/streamline/lectures/${id}/studyguide`;
+  const res = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(res.status, text.slice(0, 300) || "studyguide generation failed");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line.
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const ev = parseSseFrame(frame);
+      if (ev) onEvent(ev);
+    }
+  }
+}
+
+function parseSseFrame(raw: string): StudyguideEvent | null {
+  let eventType = "message";
+  const dataLines: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith(":")) continue; // comment / keep-alive
+    if (line.startsWith("event:")) eventType = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+  }
+  if (dataLines.length === 0) return null;
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(dataLines.join("\n"));
+  } catch {
+    return null;
+  }
+  switch (eventType) {
+    case "phase":
+      return { type: "phase", name: String(payload.name ?? ""), ...payload };
+    case "section":
+      return {
+        type: "section",
+        index: Number(payload.index ?? 0),
+        total: Number(payload.total ?? 0),
+        markdown: String(payload.markdown ?? ""),
+      };
+    case "done":
+      return {
+        type: "done",
+        markdown: String(payload.markdown ?? ""),
+        meta: (payload.meta as StudyguideMeta | null) ?? null,
+      };
+    case "error":
+      return { type: "error", message: String(payload.message ?? "error") };
+    default:
+      return null;
+  }
+}
+
 /** Build an asset URL for use as `<img src>` / `<video src>`. Doesn't fetch
  *  the bytes itself — just returns the URL the browser can load via the
  *  shared session cookie. */

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   getLecture,
   getLectureStatus,
@@ -9,9 +9,11 @@ import {
 } from "@/lib/api";
 import type { LectureProject } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ArrowLeft, Loader2, Sparkles, FileText, LayoutList } from "lucide-react";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { SlideDetailView } from "@/components/SlideDetailView";
+import { StudyguidePanel } from "@/components/StudyguidePanel";
 import { usePlaybackSync, seekVideoTo } from "@/lib/usePlaybackSync";
 
 /**
@@ -42,6 +44,18 @@ export function LectureViewerPage() {
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
+
+  // Slides ↔ Studyguide view. URL-synced via ?tab=studyguide so the
+  // My Studyguides list can deep-link straight into the guide.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: "slides" | "studyguide" =
+    searchParams.get("tab") === "studyguide" ? "studyguide" : "slides";
+  const setView = (v: "slides" | "studyguide") => {
+    const next = new URLSearchParams(searchParams);
+    if (v === "studyguide") next.set("tab", "studyguide");
+    else next.delete("tab");
+    setSearchParams(next, { replace: true });
+  };
 
   // ---- Data fetch + polling ---------------------------------------------
   useEffect(() => {
@@ -166,60 +180,110 @@ export function LectureViewerPage() {
           <h1 className="truncate text-lg font-semibold tracking-tight">{detail.lecture.name}</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant={autoScroll ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setAutoScroll((v) => !v)}
-          >
-            Auto-scroll {autoScroll ? "on" : "off"}
-          </Button>
-          <Button
-            variant={annotationsVisible ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setAnnotationsVisible((v) => !v)}
-          >
-            <Sparkles />
-            Annotations
-          </Button>
+          {/* Slides / Studyguide view toggle. */}
+          <div className="flex h-9 items-center rounded-full border border-border bg-card p-0.5">
+            <ViewTab active={view === "slides"} onClick={() => setView("slides")}>
+              <LayoutList className="h-4 w-4" />
+              Slides
+            </ViewTab>
+            <ViewTab active={view === "studyguide"} onClick={() => setView("studyguide")}>
+              <FileText className="h-4 w-4" />
+              Studyguide
+            </ViewTab>
+          </div>
+
+          {/* Slide-only controls. */}
+          {view === "slides" && (
+            <>
+              <Button
+                variant={autoScroll ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setAutoScroll((v) => !v)}
+              >
+                Auto-scroll {autoScroll ? "on" : "off"}
+              </Button>
+              <Button
+                variant={annotationsVisible ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setAnnotationsVisible((v) => !v)}
+              >
+                <Sparkles />
+                Annotations
+              </Button>
+            </>
+          )}
         </div>
       </header>
 
-      <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        {/* Video column — sticky on desktop, top of stack on mobile. */}
-        <aside className="border-b bg-card/30 p-4 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
-          <VideoPlayer
-            videoRef={videoRef}
-            src={assetUrl(id, project.videoFileName ?? "video.mp4")}
-            className="w-full rounded-lg bg-black shadow"
-          />
-          <div className="mt-3 text-xs text-muted-foreground">
-            {project.slideNotes.length} slide
-            {project.slideNotes.length === 1 ? "" : "s"} ·{" "}
-            {formatDuration(project.videoDuration)} ·{" "}
-            {project.pdfPageCount} PDF page{project.pdfPageCount === 1 ? "" : "s"}
-          </div>
-        </aside>
-
-        {/* Slide list. */}
-        <div
-          ref={slidesContainerRef}
-          className="space-y-4 overflow-y-auto p-4 md:p-6"
-        >
-          {project.slideNotes.map((note, i) => (
-            <SlideDetailView
-              key={note.id}
-              lectureId={id}
-              note={note}
-              pdfPageCount={project.pdfPageCount}
-              isActive={playback.activeSlideIndex === i}
-              activeWord={playback.activeWord}
-              onSeekTo={(t) => seekVideoTo(videoRef.current, t)}
-              annotationsVisible={annotationsVisible}
-            />
-          ))}
+      {view === "studyguide" ? (
+        <div className="flex-1 overflow-y-auto">
+          <StudyguidePanel lectureId={id} />
         </div>
-      </div>
+      ) : (
+        <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          {/* Video column — sticky on desktop, top of stack on mobile. */}
+          <aside className="border-b bg-card/30 p-4 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r">
+            <VideoPlayer
+              videoRef={videoRef}
+              src={assetUrl(id, project.videoFileName ?? "video.mp4")}
+              className="w-full rounded-lg bg-black shadow"
+            />
+            <div className="mt-3 text-xs text-muted-foreground">
+              {project.slideNotes.length} slide
+              {project.slideNotes.length === 1 ? "" : "s"} ·{" "}
+              {formatDuration(project.videoDuration)} ·{" "}
+              {project.pdfPageCount} PDF page{project.pdfPageCount === 1 ? "" : "s"}
+            </div>
+          </aside>
+
+          {/* Slide list. */}
+          <div
+            ref={slidesContainerRef}
+            className="space-y-4 overflow-y-auto p-4 md:p-6"
+          >
+            {project.slideNotes.map((note, i) => (
+              <SlideDetailView
+                key={note.id}
+                lectureId={id}
+                note={note}
+                pdfPageCount={project.pdfPageCount}
+                isActive={playback.activeSlideIndex === i}
+                activeWord={playback.activeWord}
+                onSeekTo={(t) => seekVideoTo(videoRef.current, t)}
+                annotationsVisible={annotationsVisible}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Pill tab inside the Slides/Studyguide segmented control. */
+function ViewTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors",
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

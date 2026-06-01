@@ -166,3 +166,80 @@ html, body, #root {
 .animate-dialog-content-out {
   animation: dialog-content-out 150ms ease-in;
 }
+
+/* ---- Studyguide markdown prose ----
+   Minimal typographic styling for the react-markdown output (no
+   @tailwindcss/typography dependency). Tuned to the theme tokens so it
+   reads well in both light and dark. */
+.studyguide-prose {
+  color: var(--foreground);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+.studyguide-prose > :first-child { margin-top: 0; }
+.studyguide-prose h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 1.6rem 0 0.8rem;
+  line-height: 1.2;
+}
+.studyguide-prose h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 1.5rem 0 0.6rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+.studyguide-prose h3 {
+  font-size: 1.08rem;
+  font-weight: 600;
+  margin: 1.1rem 0 0.4rem;
+}
+.studyguide-prose p { margin: 0.7rem 0; }
+.studyguide-prose ul,
+.studyguide-prose ol { margin: 0.6rem 0; padding-left: 1.4rem; }
+.studyguide-prose ul { list-style: disc; }
+.studyguide-prose ol { list-style: decimal; }
+.studyguide-prose li { margin: 0.3rem 0; }
+.studyguide-prose li::marker { color: var(--muted-foreground); }
+.studyguide-prose a { color: var(--primary); text-decoration: underline; }
+.studyguide-prose strong { font-weight: 650; color: var(--foreground); }
+.studyguide-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--muted);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.studyguide-prose pre {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  margin: 0.9rem 0;
+}
+.studyguide-prose pre code { background: transparent; padding: 0; }
+.studyguide-prose blockquote {
+  border-left: 3px solid var(--primary);
+  padding-left: 1rem;
+  margin: 0.9rem 0;
+  color: var(--muted-foreground);
+}
+.studyguide-prose hr { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+.studyguide-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+.studyguide-prose th,
+.studyguide-prose td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+}
+.studyguide-prose th { background: var(--muted); font-weight: 600; }
+.studyguide-prose img { max-width: 100%; border-radius: 8px; margin: 0.8rem 0; }
