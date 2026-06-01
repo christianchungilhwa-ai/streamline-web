@@ -4,8 +4,9 @@ import { listStudyguides, type StudyguideListItem } from "@/lib/api";
 import { Loader2, NotebookText, FileText } from "lucide-react";
 
 /** "My Studyguides" — lists the user's lectures that have a generated
- *  studyguide (server-derived; no separate store). Each row deep-links to
- *  the lecture viewer's studyguide tab. */
+ *  studyguide (server-derived; no separate store). Mirrors My Library's
+ *  layout: max-w-6xl container + card grid, each card opening the
+ *  lecture viewer's studyguide tab. */
 export function StudyguidesPage() {
   const [items, setItems] = useState<StudyguideListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +22,7 @@ export function StudyguidesPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-4xl p-6 md:p-10">
+    <div className="mx-auto max-w-6xl p-6 md:p-10">
       <header className="mb-8">
         <h1 className="page-title">My Studyguides</h1>
       </header>
@@ -48,56 +49,55 @@ export function StudyguidesPage() {
             <span className="font-medium text-foreground">Studyguide</span> tab
             to generate one. It'll show up here.
           </p>
-          <Link to="/lectures" className="mt-4 inline-block text-sm font-medium text-primary hover:underline">
+          <Link
+            to="/lectures"
+            className="mt-4 inline-block text-sm font-medium text-primary hover:underline"
+          >
             Go to My Library →
           </Link>
         </div>
       )}
 
       {items && items.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
           {items.map((sg) => (
             <li key={sg.id}>
-              <Link
-                to={`/lectures/${sg.id}?tab=studyguide`}
-                className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent"
-              >
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5">
-                  <FileText className="h-5 w-5 text-primary/80" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-foreground">
-                    {sg.name}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {sg.sectionCount != null && (
-                      <>
-                        {sg.sectionCount} section{sg.sectionCount === 1 ? "" : "s"}
-                        {sg.generatedAt != null && " · "}
-                      </>
-                    )}
-                    {sg.generatedAt != null &&
-                      `Generated ${new Date(sg.generatedAt * 1000).toLocaleDateString()}`}
-                  </div>
-                </div>
-                <svg
-                  width={8}
-                  height={14}
-                  viewBox="0 0 8 14"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="shrink-0 text-muted-foreground"
-                >
-                  <path d="M1 1l6 6-6 6" />
-                </svg>
-              </Link>
+              <StudyguideCard item={sg} />
             </li>
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+/** Mirrors LecturesPage's LectureCard: gradient media region (doc icon)
+ *  + body with title and meta. Opens the viewer's studyguide tab. */
+function StudyguideCard({ item }: { item: StudyguideListItem }) {
+  const meta: string[] = [];
+  if (item.sectionCount != null) {
+    meta.push(`${item.sectionCount} section${item.sectionCount === 1 ? "" : "s"}`);
+  }
+  if (item.generatedAt != null) {
+    meta.push(new Date(item.generatedAt * 1000).toLocaleDateString());
+  }
+
+  return (
+    <Link
+      to={`/lectures/${item.id}?tab=studyguide`}
+      className="group flex h-[240px] flex-col overflow-hidden rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+    >
+      <div className="relative flex h-[120px] items-center justify-center bg-gradient-to-br from-primary/15 to-primary/5">
+        <FileText className="h-9 w-9 text-primary/80 transition-transform group-hover:scale-110" />
+      </div>
+      <div className="flex flex-1 flex-col px-3 py-3">
+        <div className="line-clamp-2 text-sm font-semibold text-foreground">
+          {item.name}
+        </div>
+        <div className="mt-auto pt-2 text-xs text-muted-foreground">
+          {meta.join(" · ")}
+        </div>
+      </div>
+    </Link>
   );
 }
