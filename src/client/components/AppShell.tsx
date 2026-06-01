@@ -84,7 +84,7 @@ export function AppShell() {
               <img
                 src="/Streamline_logo.png"
                 alt="Streamline"
-                className="h-5 w-auto select-none brightness-0 dark:brightness-100"
+                className="h-6 w-auto select-none brightness-0 dark:brightness-100"
                 draggable={false}
               />
             </Link>
