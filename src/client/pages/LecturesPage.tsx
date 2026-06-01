@@ -160,7 +160,7 @@ export function LecturesPage() {
       {displayed === null && !error && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading lectures…
+          Loading Projects…
         </div>
       )}
 
@@ -181,7 +181,7 @@ export function LecturesPage() {
         ) : (lectures?.length ?? 0) === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
             <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
-            <h2 className="mt-4 text-lg font-medium">No lectures yet</h2>
+            <h2 className="mt-4 text-lg font-medium">No Projects yet</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Upload your first PDF + recording to get started.
             </p>
@@ -192,7 +192,7 @@ export function LecturesPage() {
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
-            No lectures match your search.
+            No Projects match your search.
           </div>
         )
       )}
