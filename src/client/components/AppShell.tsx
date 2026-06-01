@@ -115,17 +115,17 @@ export function AppShell() {
             collapsed={collapsed}
           />
           <NavRow
-            to="/studyguides"
-            icon={<NotebookText className="h-4 w-4" />}
-            label="My Studyguides"
-            active={onStudyguides}
-            collapsed={collapsed}
-          />
-          <NavRow
             to="/lectures?filter=shared"
             icon={<Users className="h-4 w-4" />}
             label="Shared with me"
             active={onShared}
+            collapsed={collapsed}
+          />
+          <NavRow
+            to="/studyguides"
+            icon={<NotebookText className="h-4 w-4" />}
+            label="My Studyguides"
+            active={onStudyguides}
             collapsed={collapsed}
           />
           <NavRow
