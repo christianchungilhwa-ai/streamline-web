@@ -4,7 +4,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { LectureViewerPage } from "./pages/LectureViewerPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { AppShell } from "./components/AppShell";
-import { NotebookText, Share2, Globe } from "lucide-react";
+import { NotebookText, Users, Globe } from "lucide-react";
 
 /** Top-level router. All routes are session-gated by the AppShell, which
  *  redirects anonymous visitors to claraity.app/login (the canonical
@@ -39,7 +39,7 @@ export default function App() {
             <ComingSoonPage
               title="Shared with me"
               description="Lectures and study guides shared with you by classmates, study groups, or instructors. You'll see everything that's been sent your way in one place."
-              icon={<Share2 className="h-7 w-7" />}
+              icon={<Users className="h-7 w-7" />}
             />
           }
         />

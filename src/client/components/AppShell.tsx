@@ -3,7 +3,7 @@ import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
-import { BookOpen, NotebookText, Share2, Globe, Sun, Moon } from "lucide-react";
+import { BookOpen, NotebookText, Users, Globe, Sun, Moon } from "lucide-react";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login with
@@ -95,7 +95,7 @@ export function AppShell() {
           <NavRow to="/studyguides" icon={<NotebookText className="h-4 w-4" />} active={onStudyguides}>
             My Studyguides
           </NavRow>
-          <NavRow to="/shared" icon={<Share2 className="h-4 w-4" />} active={onShared}>
+          <NavRow to="/shared" icon={<Users className="h-4 w-4" />} active={onShared}>
             Shared with me
           </NavRow>
           <NavRow to="/community" icon={<Globe className="h-4 w-4" />} active={onCommunity}>
