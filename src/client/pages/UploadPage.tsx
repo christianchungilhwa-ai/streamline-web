@@ -2,22 +2,24 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { createLecture, startLecture, uploadFile, ApiError } from "@/lib/api";
-import { Loader2, Upload, FileText, Film } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Loader2, Upload, FileText, Video } from "lucide-react";
 
 type Phase = "idle" | "creating" | "uploading" | "starting" | "done" | "error";
 
-/** Two-file upload page: PDF (slide deck) + video (recording).
- *  Flow:
- *   1. POST /api/streamline/lectures → get back jobId + 2 upload URLs
- *   2. PUT both files DIRECTLY to streamline-server (cross-domain,
- *      no Claraity-web in the byte path — multi-GB videos never
- *      touch our request handler)
- *   3. POST /api/streamline/lectures/:id/start to kick off processing
- *   4. Navigate to the lecture viewer (which will show the
- *      processing-progress UI as the job runs)
+/** New-lecture upload page. Flow unchanged from earlier:
  *
- *  Layout: title + subtitle on the page, form wrapped in a Claraity
- *  card-surface panel for visual containment. */
+ *   1. POST /api/streamline/lectures → jobId + 2 upload URLs
+ *   2. PUT both files DIRECTLY to streamline-server (parallel)
+ *   3. POST /api/streamline/lectures/:id/start to kick off processing
+ *   4. Navigate to the viewer (which shows the processing UI)
+ *
+ *  Layout mirrors the iOS "New Lecture Project" sheet — centered
+ *  title, a single Project Name input, then two big dashed cards
+ *  side-by-side for the two file slots, centered Cancel + Continue
+ *  at the bottom. Each card gets its own accent: sky-blue (brand)
+ *  for the video, amber for the PDF — matches the iOS mockup so
+ *  the slots are instantly distinguishable. */
 export function UploadPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -29,6 +31,7 @@ export function UploadPage() {
   const [videoProgress, setVideoProgress] = useState(0);
 
   const submitDisabled = !pdf || !video || phase !== "idle";
+  const busy = phase === "creating" || phase === "uploading" || phase === "starting";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,7 +42,6 @@ export function UploadPage() {
       const created = await createLecture(name.trim() || "Untitled Lecture");
 
       setPhase("uploading");
-      // Run uploads in parallel — they're independent S3-style PUTs.
       await Promise.all([
         uploadFile(created.pdfUploadUrl, pdf, (loaded, total) =>
           setPdfProgress(total ? loaded / total : 0),
@@ -62,70 +64,72 @@ export function UploadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6 md:p-10">
-      <header className="mb-8">
-        <h1 className="page-title">New lecture</h1>
-        <p className="page-subtitle">
-          Upload the slide deck (PDF) and the lecture recording (MP4). Both go
-          directly to the processing server — Claraity isn’t in the byte path.
-        </p>
-      </header>
+    <div className="mx-auto max-w-3xl px-6 py-10 md:py-16">
+      <h1 className="page-title text-center">New Lecture Project</h1>
 
-      <form
-        onSubmit={onSubmit}
-        className="card-surface space-y-6 p-6 md:p-8"
-      >
-        <Field label="Lecture name" htmlFor="name">
-          <input
-            id="name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. OMPR Final, Lec 33"
-            className="block w-full rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-            maxLength={200}
-            disabled={phase !== "idle"}
+      <form onSubmit={onSubmit} className="mt-10 space-y-5">
+        {/* Project name — large dark input, full-width. */}
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Project Name"
+          aria-label="Project name"
+          className={cn(
+            "block w-full rounded-2xl border border-border bg-card px-5 py-4",
+            "text-base text-foreground placeholder:text-muted-foreground",
+            "transition-colors",
+            "focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+          )}
+          maxLength={200}
+          disabled={busy}
+        />
+
+        {/* Two big file slots, side-by-side on tablet/desktop, stacked on mobile. */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <FileSelectCard
+            accent="sky"
+            title="Lecture Recording"
+            icon={<Video className="h-11 w-11" strokeWidth={2.2} />}
+            accept="video/mp4,video/quicktime,video/*"
+            file={video}
+            onPick={setVideo}
+            progress={phase === "uploading" ? videoProgress : null}
+            disabled={busy}
           />
-        </Field>
-
-        <FilePicker
-          label="Slide deck (PDF)"
-          accept="application/pdf"
-          icon={<FileText className="h-5 w-5 text-primary" />}
-          file={pdf}
-          onPick={setPdf}
-          progress={phase === "uploading" ? pdfProgress : null}
-          disabled={phase !== "idle"}
-        />
-
-        <FilePicker
-          label="Lecture recording (MP4)"
-          accept="video/mp4,video/quicktime,video/*"
-          icon={<Film className="h-5 w-5 text-primary" />}
-          file={video}
-          onPick={setVideo}
-          progress={phase === "uploading" ? videoProgress : null}
-          disabled={phase !== "idle"}
-        />
+          <FileSelectCard
+            accent="amber"
+            title="Slide Deck (PDF)"
+            icon={<FileText className="h-11 w-11" strokeWidth={2.2} />}
+            accept="application/pdf"
+            file={pdf}
+            onPick={setPdf}
+            progress={phase === "uploading" ? pdfProgress : null}
+            disabled={busy}
+          />
+        </div>
 
         {error && (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
-        <div className="flex items-center gap-3 pt-2">
-          <Button type="submit" disabled={submitDisabled}>
-            {phase === "idle" || phase === "error" ? <Upload /> : <Loader2 className="animate-spin" />}
-            {phaseLabel(phase)}
-          </Button>
+        {/* Centered buttons. Cancel is text-style brand-blue, Continue is
+            the solid primary action. */}
+        <div className="flex items-center justify-center gap-2 pt-2">
           <Button
             type="button"
             variant="ghost"
             onClick={() => navigate("/lectures")}
-            disabled={phase === "uploading" || phase === "starting" || phase === "creating"}
+            disabled={busy}
+            className="text-primary hover:text-primary"
           >
             Cancel
+          </Button>
+          <Button type="submit" disabled={submitDisabled}>
+            {busy ? <Loader2 className="animate-spin" /> : <Upload />}
+            {phaseLabel(phase)}
           </Button>
         </div>
       </form>
@@ -136,13 +140,13 @@ export function UploadPage() {
 function phaseLabel(p: Phase): string {
   switch (p) {
     case "idle":
-      return "Upload and start";
+      return "Continue";
     case "creating":
-      return "Creating lecture…";
+      return "Creating…";
     case "uploading":
-      return "Uploading files…";
+      return "Uploading…";
     case "starting":
-      return "Kicking off processing…";
+      return "Starting…";
     case "done":
       return "Done";
     case "error":
@@ -150,87 +154,82 @@ function phaseLabel(p: Phase): string {
   }
 }
 
-/** A labeled form field. Keeps the label/input pairing consistent
- *  with Claraity's `.form-group` spacing (label tight to its
- *  control, group-to-group spacing handled by parent `space-y-6`). */
-function Field({
-  label,
-  htmlFor,
-  children,
-}: {
-  label: string;
-  htmlFor?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label
-        htmlFor={htmlFor}
-        className="mb-2 block text-sm font-semibold text-foreground"
-      >
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function FilePicker({
-  label,
-  accept,
+/** A single big file-select card. Two accents only: `"sky"` (brand,
+ *  for video) and `"amber"` (for PDF). Kept as a closed enum so
+ *  Tailwind's JIT compiler can statically resolve the class strings.
+ *
+ *  Card states:
+ *  - Empty   → icon + "Tap to select"
+ *  - Filled  → icon + filename + size
+ *  - Upload  → progress bar fills bottom edge, dims rest
+ *  - Disabled → pointer-events-none + opacity-60 */
+function FileSelectCard({
+  accent,
+  title,
   icon,
+  accept,
   file,
   onPick,
   progress,
   disabled,
 }: {
-  label: string;
-  accept: string;
+  accent: "sky" | "amber";
+  title: string;
   icon: React.ReactNode;
+  accept: string;
   file: File | null;
   onPick: (f: File | null) => void;
   progress: number | null;
   disabled: boolean;
 }) {
+  // Static class branches — Tailwind needs to see literal strings.
+  const cardTone =
+    accent === "sky"
+      ? "border-primary/50 bg-primary/[0.06] hover:border-primary/70 hover:bg-primary/10"
+      : "border-amber-500/50 bg-amber-500/[0.06] hover:border-amber-500/70 hover:bg-amber-500/10";
+  const iconTone =
+    accent === "sky" ? "text-primary" : "text-amber-500";
+  const progressTone =
+    accent === "sky" ? "bg-primary" : "bg-amber-500";
+
   return (
-    <div>
-      <span className="mb-2 block text-sm font-semibold text-foreground">
-        {label}
-      </span>
-      <label
-        className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border-2 border-dashed border-border bg-background px-4 py-4 text-sm transition-colors hover:border-primary/50 hover:bg-primary/5 ${
-          disabled ? "pointer-events-none opacity-60" : ""
-        }`}
-      >
-        <span className="flex min-w-0 items-center gap-3">
-          {icon}
-          {file ? (
-            <span className="truncate">
-              <span className="font-medium">{file.name}</span>{" "}
-              <span className="text-muted-foreground">
-                ({(file.size / (1024 * 1024)).toFixed(1)} MB)
-              </span>
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Choose file…</span>
-          )}
+    <label
+      className={cn(
+        "group relative flex min-h-[200px] cursor-pointer flex-col items-center justify-center",
+        "gap-3 overflow-hidden rounded-2xl border-2 border-dashed",
+        "px-6 py-10 text-center transition-all",
+        cardTone,
+        disabled && "pointer-events-none opacity-60",
+      )}
+    >
+      <span className={cn(iconTone)}>{icon}</span>
+      <span className="text-base font-semibold text-foreground">{title}</span>
+      {file ? (
+        <span className="line-clamp-1 max-w-full text-xs text-muted-foreground">
+          <span className="text-foreground">{file.name}</span>
+          <span> · {(file.size / (1024 * 1024)).toFixed(1)} MB</span>
         </span>
-        <input
-          type="file"
-          accept={accept}
-          className="hidden"
-          onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-          disabled={disabled}
-        />
-      </label>
+      ) : (
+        <span className="text-xs text-muted-foreground">Tap to select</span>
+      )}
+
+      {/* Upload progress — thin bar pinned to the bottom edge of the card. */}
       {progress !== null && (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-black/10 dark:bg-white/10">
           <div
-            className="h-full bg-primary transition-[width]"
+            className={cn("h-full transition-[width]", progressTone)}
             style={{ width: `${Math.round(progress * 100)}%` }}
           />
         </div>
       )}
-    </div>
+
+      <input
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+        disabled={disabled}
+      />
+    </label>
   );
 }
