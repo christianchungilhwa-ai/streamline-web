@@ -30,7 +30,7 @@ export function LecturesPage() {
     <div className="mx-auto max-w-6xl p-6 md:p-10">
       <header className="mb-8 flex items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="page-title">Your lectures</h1>
+          <h1 className="page-title">My Library</h1>
           <p className="page-subtitle">
             Upload a PDF + recording and Streamline aligns the slides to the
             transcript.
