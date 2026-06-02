@@ -29,9 +29,10 @@ export function CommunityIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-/** Filled card with a left-edge spine/margin and horizontal text lines
- *  (SF Symbol "menucard.fill"). Used for the "My Library" sidebar tab —
- *  matches the iOS/Claraity My-Library glyph rather than an open book. */
+/** Closed book — a left spine + horizontal text lines on the cover
+ *  (SF Symbol "text.book.closed.fill"). Matches the iOS app's My Library /
+ *  project glyph (ProjectListView + Workflow views) rather than an open book.
+ *  Uses evenodd so the spine + text lines read as cut-outs. */
 export function LibraryIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -40,7 +41,11 @@ export function LibraryIcon(props: SVGProps<SVGSVGElement>) {
       xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
-      <path d="M5.5 3h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 4a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9zm0 3a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9zm0 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5h-6z" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M6.5 3H17a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm1 2.65a.6.6 0 0 0-.6.6v11.5a.6.6 0 0 0 1.2 0V6.25a.6.6 0 0 0-.6-.6Zm3.4 1.6a.7.7 0 1 0 0 1.4h4.7a.7.7 0 1 0 0-1.4h-4.7Zm0 3a.7.7 0 1 0 0 1.4h4.7a.7.7 0 1 0 0-1.4h-4.7Z"
+      />
     </svg>
   );
 }
