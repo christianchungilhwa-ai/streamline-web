@@ -3,23 +3,40 @@ import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
-import { BookOpen, NotebookText, Users, Sun, Moon, PanelLeft } from "lucide-react";
+import { BookOpen, NotebookText, Users, Sun, Moon, PanelLeft, Menu, X } from "lucide-react";
 import { CommunityIcon } from "@/lib/icons";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login.
  *
  *  The sidebar is a 1:1 translation of Claraity-web's `.sidebar` CSS box
- *  model (padding 16/12, 4px child gap, 220px → 56px collapsed, header
- *  padding 12/8/20, nav gap 2px + 100px top, nav-item padding 10/12 with
- *  hover scale, footer column with theme-toggle + collapse-btn). Values
- *  are taken verbatim from Claraity's index.css so the two apps match.
+ *  model. On desktop it's a static, collapsible rail (220px → 56px). On
+ *  mobile (<768px) it mirrors Claraity-web's mobile pattern: a 48px top bar
+ *  with a hamburger + section title + logo, and the sidebar becomes a
+ *  slide-in drawer over a dimmed backdrop.
  */
 export function AppShell() {
   const location = useLocation();
   const [user, setUser] = useState<SessionUser | null | "loading">("loading");
   const { theme, toggle: toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Track the mobile breakpoint so the drawer always renders expanded on
+  // phones (the desktop "collapsed" rail doesn't apply there).
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // Close the mobile drawer whenever the route changes (i.e. on nav tap).
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     let alive = true;
@@ -56,27 +73,71 @@ export function AppShell() {
   const onStudyguides = location.pathname === "/studyguides";
   const onCommunity = location.pathname === "/community";
 
+  // The collapsed rail is a desktop affordance; on mobile the drawer is
+  // always full-width/expanded.
+  const effCollapsed = collapsed && !isMobile;
+  const title = onShared
+    ? "Shared with me"
+    : onStudyguides
+      ? "My Studyguides"
+      : onCommunity
+        ? "Community"
+        : location.pathname.startsWith("/lectures/")
+          ? "Lecture"
+          : "My Library";
+
   return (
-    <div className="flex h-full">
-      {/* .sidebar — padding 16px 12px, gap 4px, 220px (56px collapsed). */}
+    <div className="flex h-full flex-col md:flex-row">
+      {/* Mobile top bar — hamburger + section title + logo (md:hidden). */}
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card/85 px-3 backdrop-blur-xl md:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="flex-1 truncate text-base font-semibold text-foreground">{title}</span>
+        <img
+          src="/Streamline_logo.png"
+          alt="Streamline"
+          className="h-[18px] w-auto select-none brightness-0 dark:brightness-100"
+          draggable={false}
+        />
+      </header>
+
+      {/* Backdrop behind the open mobile drawer. */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] md:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      {/* .sidebar — static/collapsible on desktop, slide-in drawer on mobile. */}
       <aside
         className={cn(
-          "hidden shrink-0 flex-col gap-1 md:flex",
-          "border-r border-border bg-card/85 backdrop-blur-xl",
-          "transition-[width,min-width] duration-200",
+          "flex shrink-0 flex-col gap-1 border-r border-border bg-card/85 backdrop-blur-xl",
+          // Mobile: fixed slide-in drawer (always 220px expanded).
+          "fixed inset-y-0 left-0 z-50 w-[220px] px-3 py-4 transition-transform duration-200",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          // Desktop: in-flow, collapsible, no transform.
+          "md:static md:z-auto md:translate-x-0 md:transition-[width,min-width]",
           collapsed
-            ? "w-14 min-w-14 items-center px-1.5 py-4"
-            : "w-[220px] min-w-[220px] px-3 py-4",
+            ? "md:w-14 md:min-w-14 md:items-center md:px-1.5 md:py-4"
+            : "md:w-[220px] md:min-w-[220px] md:px-3 md:py-4",
         )}
       >
-        {/* .sidebar-header — padding 12px 8px 20px, space-between. */}
+        {/* .sidebar-header — logo + avatar (+ close button on mobile). */}
         <div
           className={cn(
             "flex items-center pb-5 pt-3",
-            collapsed ? "justify-center px-0" : "justify-between px-2",
+            effCollapsed ? "justify-center px-0" : "justify-between px-2",
           )}
         >
-          {!collapsed && (
+          {!effCollapsed && (
             <Link
               to="/lectures"
               className="flex items-center overflow-hidden transition-opacity hover:opacity-80"
@@ -89,7 +150,17 @@ export function AppShell() {
               />
             </Link>
           )}
-          <Avatar user={user} size={collapsed ? 24 : 28} />
+          <div className="flex items-center gap-1.5">
+            <Avatar user={user} size={effCollapsed ? 24 : 28} />
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              aria-label="Close menu"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* .sidebar-nav — gap 2px, padding-top 100px. */}
@@ -99,34 +170,34 @@ export function AppShell() {
             icon={<BookOpen className="h-[18px] w-[18px]" />}
             label="My Library"
             active={onLibrary}
-            collapsed={collapsed}
+            collapsed={effCollapsed}
           />
           <NavRow
             to="/lectures?filter=shared"
             icon={<Users className="h-[18px] w-[18px]" />}
             label="Shared with me"
             active={onShared}
-            collapsed={collapsed}
+            collapsed={effCollapsed}
           />
           <NavRow
             to="/studyguides"
             icon={<NotebookText className="h-[18px] w-[18px]" />}
             label="My Studyguides"
             active={onStudyguides}
-            collapsed={collapsed}
+            collapsed={effCollapsed}
           />
           <NavRow
             to="/community"
             icon={<CommunityIcon className="h-[18px] w-[18px]" />}
             label="Community"
             active={onCommunity}
-            collapsed={collapsed}
+            collapsed={effCollapsed}
           />
         </nav>
 
-        {/* .sidebar-footer — column, padding 8px, margin-top 8px, border-top. */}
+        {/* .sidebar-footer — theme toggle + (desktop-only) collapse control. */}
         <div className="mt-2 flex w-full flex-col items-center border-t border-border p-2">
-          {collapsed && (
+          {effCollapsed && (
             <CollapseButton
               onClick={() => setCollapsed(false)}
               title="Expand sidebar"
@@ -141,7 +212,7 @@ export function AppShell() {
               title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               className={cn(
                 "flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                collapsed && "justify-center",
+                effCollapsed && "justify-center",
               )}
             >
               {theme === "dark" ? (
@@ -149,10 +220,11 @@ export function AppShell() {
               ) : (
                 <Moon className="h-[15px] w-[15px]" />
               )}
-              {!collapsed && <span>{theme === "dark" ? "Light" : "Dark"}</span>}
+              {!effCollapsed && <span>{theme === "dark" ? "Light" : "Dark"}</span>}
             </button>
 
-            {!collapsed && (
+            {/* Collapse is a desktop-only affordance. */}
+            {!effCollapsed && !isMobile && (
               <CollapseButton onClick={() => setCollapsed(true)} title="Collapse sidebar" />
             )}
           </div>
