@@ -28,3 +28,19 @@ export function CommunityIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** Filled card with a left-edge spine/margin and horizontal text lines
+ *  (SF Symbol "menucard.fill"). Used for the "My Library" sidebar tab —
+ *  matches the iOS/Claraity My-Library glyph rather than an open book. */
+export function LibraryIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path d="M5.5 3h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 4a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9zm0 3a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9zm0 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5h-6z" />
+    </svg>
+  );
+}

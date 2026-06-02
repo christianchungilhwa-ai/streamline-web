@@ -3,8 +3,8 @@ import { Outlet, useLocation, Link } from "react-router-dom";
 import { getSessionUser, type SessionUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
-import { BookOpen, NotebookText, Users, Sun, Moon, PanelLeft, Menu, X } from "lucide-react";
-import { CommunityIcon } from "@/lib/icons";
+import { NotebookText, Users, Sun, Moon, PanelLeft, Menu, X } from "lucide-react";
+import { CommunityIcon, LibraryIcon } from "@/lib/icons";
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login.
@@ -167,7 +167,7 @@ export function AppShell() {
         <nav className="flex flex-1 flex-col gap-0.5 pt-[100px]">
           <NavRow
             to="/lectures"
-            icon={<BookOpen className="h-[18px] w-[18px]" />}
+            icon={<LibraryIcon className="h-[18px] w-[18px]" />}
             label="My Library"
             active={onLibrary}
             collapsed={effCollapsed}
