@@ -13,6 +13,8 @@
  * All helpers below throw `ApiError` on non-2xx responses.
  */
 
+import type { ROIRegion } from "./types";
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -136,10 +138,21 @@ export function createLecture(name: string) {
   });
 }
 
-export function startLecture(id: string) {
+export function startLecture(id: string, roi?: ROIRegion) {
   return request<{ jobId: string; executionArn?: string }>(`/api/streamline/lectures/${id}/start`, {
     method: "POST",
+    body: roi ? JSON.stringify({ roi }) : undefined,
   });
+}
+
+/** Ask the server to suggest a slide-region ROI for the uploaded video so the
+ *  user can confirm/adjust it before processing (parity with the iOS step).
+ *  Runs Claude vision server-side, so it can take several seconds. */
+export function suggestRoi(id: string) {
+  return request<{ roi: ROIRegion; autoDetected: boolean }>(
+    `/api/streamline/lectures/${id}/roi-suggest`,
+    { method: "POST" },
+  );
 }
 
 export function getLectureStatus(id: string) {
