@@ -28,9 +28,9 @@ type Phase = "idle" | "creating" | "uploading" | "roi" | "starting" | "done" | "
  *
  *   1. POST /api/streamline/lectures → jobId + 2 upload URLs
  *   2. PUT both files DIRECTLY to streamline-server (parallel)
- *   3. ROI step (parity with iOS): confirm/adjust the slide region on a
- *      frame of the just-uploaded video, pre-filled with the server's
- *      auto-detected suggestion. "Auto-detect for me" skips it.
+ *   3. ROI step (parity with iOS): confirm/adjust the slide region across
+ *      six frames of the just-uploaded video, pre-filled with the server's
+ *      auto-detected suggestion.
  *   4. POST /api/streamline/lectures/:id/start (with the confirmed ROI)
  *   5. Close + navigate to the viewer
  *
@@ -140,7 +140,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
+      <DialogContent className={cn(inRoi && "sm:max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>{inRoi ? "Confirm slide region" : "New Project"}</DialogTitle>
         </DialogHeader>
@@ -153,7 +153,6 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
             busy={phase === "starting"}
             error={error}
             onConfirm={(roi) => finishStart(roi)}
-            onAutoDetect={() => finishStart(undefined)}
             onCancel={cancelFromRoi}
           />
         ) : (
