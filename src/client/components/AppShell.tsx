@@ -193,6 +193,44 @@ export function AppShell() {
             active={onCommunity}
             collapsed={effCollapsed}
           />
+
+          {/* Back to CLARAiTY — mirrors StreamlineVX's "Back to CLARAiTY"
+              tab: a divider, a back arrow (↖), and the CLARAiTY wordmark.
+              Plain <a> to the main app (separate subdomain, shared
+              .claraity.app session cookie). Collapses to just the arrow. */}
+          <div className={cn("my-2 border-t border-border", effCollapsed ? "mx-1" : "mx-2")} />
+          <a
+            href="https://claraity.app"
+            title="Back to CLARAiTY"
+            className={cn(
+              "flex items-center gap-2.5 rounded-md text-sm font-medium transition-all",
+              effCollapsed ? "justify-center p-2.5" : "px-3 py-2.5",
+              "text-muted-foreground hover:scale-[1.02] hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <span className="flex w-6 shrink-0 items-center justify-center">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-[15px] w-[15px]"
+              >
+                <line x1="19" y1="19" x2="6" y2="6" />
+                <polyline points="14 6 6 6 6 14" />
+              </svg>
+            </span>
+            {!effCollapsed && (
+              <img
+                src="/to-claraity-logo.png"
+                alt="CLARAiTY"
+                className="h-4 w-auto select-none opacity-75 dark:opacity-90"
+                draggable={false}
+              />
+            )}
+          </a>
         </nav>
 
         {/* .sidebar-footer — theme toggle + (desktop-only) collapse control. */}
