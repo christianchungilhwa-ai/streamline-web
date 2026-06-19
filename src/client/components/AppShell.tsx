@@ -194,43 +194,16 @@ export function AppShell() {
             collapsed={effCollapsed}
           />
 
-          {/* Back to CLARAiTY — mirrors StreamlineVX's "Back to CLARAiTY"
-              tab: a divider, a back arrow (↖), and the CLARAiTY wordmark.
-              Plain <a> to the main app (separate subdomain, shared
-              .claraity.app session cookie). Collapses to just the arrow. */}
-          <div className={cn("my-2 border-t border-border", effCollapsed ? "mx-1" : "mx-2")} />
-          <a
-            href="https://claraity.app"
-            title="Back to CLARAiTY"
-            className={cn(
-              "flex items-center gap-2.5 rounded-md text-sm font-medium transition-all",
-              effCollapsed ? "justify-center p-2.5" : "px-3 py-2.5",
-              "text-muted-foreground hover:scale-[1.02] hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex w-6 shrink-0 items-center justify-center">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-[15px] w-[15px]"
-              >
-                <line x1="19" y1="19" x2="6" y2="6" />
-                <polyline points="14 6 6 6 6 14" />
-              </svg>
-            </span>
-            {!effCollapsed && (
-              <img
-                src="/to-claraity-logo.png"
-                alt="CLARAiTY"
-                className="h-4 w-auto select-none opacity-75 dark:opacity-90"
-                draggable={false}
-              />
-            )}
-          </a>
+          {/* Cross-app shortcuts — the rest of the CLARAiTY family (CLARAiTY
+              + StreamlineVX + AudioFile; excludes Streamline itself). Pinned
+              to the bottom of the nav (mt-auto) with a divider on top. Each
+              row = ↗ arrow + the app's 16px icon; the light CLARAiTY /
+              AudioFile icons get a hairline ring. Collapses to arrow-only. */}
+          <div className="mt-auto flex flex-col gap-0.5 border-t border-border pt-2">
+            <CrossAppShortcut href="https://claraity.app" label="CLARAiTY" icon="/claraity-icon.png" light collapsed={effCollapsed} />
+            <CrossAppShortcut href="https://claraity.app/streamlinevx" label="StreamlineVX" icon="/vx-logo.png" collapsed={effCollapsed} />
+            <CrossAppShortcut href="https://audiofile.claraity.app" label="AudioFile" icon="/audiofile-icon.png" light collapsed={effCollapsed} />
+          </div>
         </nav>
 
         {/* .sidebar-footer — theme toggle + (desktop-only) collapse control. */}
@@ -333,6 +306,62 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
     >
       {initial}
     </div>
+  );
+}
+
+/** Cross-app shortcut row — a ↗ arrow + the target app's icon, styled like
+ *  an idle NavRow. External link to a sibling CLARAiTY-family app. Light
+ *  icons (CLARAiTY / AudioFile) get a hairline ring so their edge reads on
+ *  the light sidebar; collapses to the arrow only. */
+function CrossAppShortcut({
+  href,
+  label,
+  icon,
+  light = false,
+  collapsed,
+}: {
+  href: string;
+  label: string;
+  icon: string;
+  light?: boolean;
+  collapsed: boolean;
+}) {
+  return (
+    <a
+      href={href}
+      title={label}
+      className={cn(
+        "flex items-center gap-2.5 rounded-md text-sm font-medium transition-all",
+        collapsed ? "justify-center p-2.5" : "px-3 py-1",
+        "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      <span className="flex w-6 shrink-0 items-center justify-center">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-[15px] w-[15px]"
+        >
+          <line x1="6" y1="19" x2="19" y2="6" />
+          <polyline points="9 6 19 6 19 16" />
+        </svg>
+      </span>
+      {!collapsed && (
+        <img
+          src={icon}
+          alt={label}
+          className={cn(
+            "h-4 w-4 shrink-0 rounded-[4px]",
+            light && "shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]",
+          )}
+          draggable={false}
+        />
+      )}
+    </a>
   );
 }
 
