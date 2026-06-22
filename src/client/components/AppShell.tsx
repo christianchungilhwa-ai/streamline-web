@@ -198,7 +198,7 @@ export function AppShell() {
               + StreamlineVX + AudioFile; excludes Streamline itself). Pinned
               to the bottom of the nav (mt-auto) with a divider on top. Each
               row = ↗ arrow + the app's 16px icon; the light CLARAiTY /
-              AudioFile icons get a hairline ring. Collapses to arrow-only. */}
+              AudioFile icons get a hairline ring. Collapses to the icon. */}
           <div className="mt-auto flex flex-col gap-0.5 border-t border-border pt-2">
             <CrossAppShortcut href="https://claraity.app" label="CLARAiTY" icon="/claraity-icon.png" light collapsed={effCollapsed} />
             <CrossAppShortcut href="https://claraity.app/streamlinevx" label="StreamlineVX" icon="/vx-logo.png" collapsed={effCollapsed} />
@@ -312,7 +312,7 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
 /** Cross-app shortcut row — a ↗ arrow + the target app's icon, styled like
  *  an idle NavRow. External link to a sibling CLARAiTY-family app. Light
  *  icons (CLARAiTY / AudioFile) get a hairline ring so their edge reads on
- *  the light sidebar; collapses to the arrow only. */
+ *  the light sidebar; collapses to the app icon only. */
 function CrossAppShortcut({
   href,
   label,
@@ -336,31 +336,33 @@ function CrossAppShortcut({
         "text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >
-      <span className="flex w-6 shrink-0 items-center justify-center">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-[15px] w-[15px]"
-        >
-          <line x1="6" y1="19" x2="19" y2="6" />
-          <polyline points="9 6 19 6 19 16" />
-        </svg>
-      </span>
       {!collapsed && (
-        <img
-          src={icon}
-          alt={label}
-          className={cn(
-            "h-4 w-4 shrink-0 rounded-[4px]",
-            light && "shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]",
-          )}
-          draggable={false}
-        />
+        <span className="flex w-6 shrink-0 items-center justify-center">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-[15px] w-[15px]"
+          >
+            <line x1="6" y1="19" x2="19" y2="6" />
+            <polyline points="9 6 19 6 19 16" />
+          </svg>
+        </span>
       )}
+      {/* App icon — always shown; in the collapsed rail it's the only mark
+          (centered), which is how you tell the shortcuts apart. */}
+      <img
+        src={icon}
+        alt={label}
+        className={cn(
+          "h-4 w-4 shrink-0 rounded-[4px]",
+          light && "shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]",
+        )}
+        draggable={false}
+      />
     </a>
   );
 }
