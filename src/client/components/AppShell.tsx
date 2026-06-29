@@ -151,7 +151,7 @@ export function AppShell() {
             </Link>
           )}
           <div className="flex items-center gap-1.5">
-            <Avatar user={user} size={effCollapsed ? 24 : 28} />
+            <Avatar user={user} size={26} />
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
