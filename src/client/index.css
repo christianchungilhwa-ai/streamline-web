@@ -243,3 +243,191 @@ html, body, #root {
 }
 .studyguide-prose th { background: var(--muted); font-weight: 600; }
 .studyguide-prose img { max-width: 100%; border-radius: 8px; margin: 0.8rem 0; }
+
+/* ---- Studyguide structured visuals ----
+   Styling for the resolved-studyguide components (DrawioDiagram +
+   SgPairTabs). Mirrors the Mac app's StudyguideView CSS vocabulary
+   (folder tabs, white diagram card) re-expressed in theme tokens. */
+
+/* draw.io diagram card. White background regardless of theme — the
+   diagrams are authored on white and their strokes/labels assume it
+   (same choice as the Mac's paper-styled page). */
+.sg-drawio-wrap {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 1.2rem 0;
+  overflow: visible;
+}
+.sg-drawio { min-height: 0; width: 100%; box-sizing: border-box; }
+.sg-drawio svg { max-width: 100%; width: 100%; height: auto; display: block; }
+.sg-drawio-badge {
+  display: inline-block;
+  font-size: 0.78em;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 4px;
+  margin-right: 4px;
+  vertical-align: middle;
+  background: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+}
+/* Fallback card when viewer-static.min.js can't load. */
+.sg-drawio-fallback { background: var(--card); }
+.sg-drawio-fallback figcaption {
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+.sg-drawio-fallback details { margin-top: 0.6rem; }
+.sg-drawio-fallback summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
+.sg-drawio-fallback pre { margin-bottom: 0; }
+
+/* Paired-visual folder tabs ("From Slide" | "Visualization").
+   Tabs sit ON TOP of the content card: rounded top corners, negative
+   bottom offset to overlap the card border, z-index layering so the
+   active tab visually merges with the card — the physical-file-folder
+   idiom ported from the Mac app / Audiofile. */
+.sg-pair { margin: 1.4rem 0; }
+.sg-pair-tab-bar { display: flex; gap: 0; padding: 0; }
+.sg-pair-tab {
+  padding: 8px 12px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: var(--muted);
+  position: relative;
+  bottom: -1px;
+  z-index: 1;
+  opacity: 0.75;
+  transition: all 0.15s ease;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sg-pair-tab:hover:not(.sg-pair-tab-active) { opacity: 0.9; }
+.sg-pair-tab:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.sg-pair-tab.sg-pair-tab-active {
+  background: var(--card);
+  z-index: 3;
+  opacity: 1;
+}
+.sg-pair-content {
+  position: relative;
+  z-index: 2;
+  border: 1px solid var(--border);
+  border-radius: 0 10px 10px 10px;
+  background: var(--card);
+  padding: 14px;
+  overflow: hidden;
+}
+/* When a right-hand tab is active, swap the card's top-corner rounding
+   so the active tab visually connects on the right side. */
+.sg-pair-content.sg-pair-right-active { border-radius: 10px 0 10px 10px; }
+.sg-pair-panel-hidden { display: none; }
+.sg-pair-panel > :first-child { margin-top: 0; }
+.sg-pair-panel > :last-child { margin-bottom: 0; }
+.sg-pair-panel img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+/* Only the print stylesheet's unwound panels show this label. */
+.sg-pair-panel::before { content: none; }
+
+/* H2 of the section currently being regenerated. */
+.sg-h2-regenerating { opacity: 0.65; }
+
+/* ---- Studyguide print / PDF export ----
+   "Export PDF" adds `sg-printing` to <body> and calls window.print():
+   the rules below isolate the `.sg-print-root` article (print-root
+   pattern), force paper-friendly light tokens over the app's dark
+   theme, and keep figures/tables/diagrams unsplit across pages.
+   sg-pair tabs are unwound into stacked, labeled panels — the same
+   treatment as the Mac app's PDF exporter. */
+@media print {
+  body.sg-printing * { visibility: hidden; }
+  body.sg-printing .sg-print-root,
+  body.sg-printing .sg-print-root * { visibility: visible; }
+  body.sg-printing,
+  body.sg-printing #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+  /* Nested scroll panes would clip the paginated output. */
+  body.sg-printing * { overflow: visible !important; }
+  body.sg-printing .sg-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    /* Paper-friendly token overrides — cascade into the prose rules. */
+    --foreground: #1a1a1a;
+    --muted-foreground: #4b5563;
+    --border: rgba(0, 0, 0, 0.15);
+    --muted: #f3f4f6;
+    --card: #ffffff;
+    --primary: #0369a1;
+    background: #ffffff;
+    color: var(--foreground);
+  }
+  body.sg-printing .sg-print-root figure,
+  body.sg-printing .sg-print-root table,
+  body.sg-printing .sg-print-root img,
+  body.sg-printing .sg-print-root .sg-pair,
+  body.sg-printing .sg-print-root .sg-drawio-wrap,
+  body.sg-printing .sg-print-root blockquote,
+  body.sg-printing .sg-print-root pre {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  body.sg-printing .sg-print-root h1,
+  body.sg-printing .sg-print-root h2,
+  body.sg-printing .sg-print-root h3,
+  body.sg-printing .sg-print-root h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  body.sg-printing .sg-print-root pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  /* Unwind the pair tabs: hide the tab bar, stack every panel with a
+     small label naming its source. */
+  body.sg-printing .sg-pair-tab-bar { display: none; }
+  body.sg-printing .sg-pair-content { border-radius: 10px; }
+  body.sg-printing .sg-pair-panel-hidden { display: block !important; }
+  body.sg-printing .sg-pair-panel + .sg-pair-panel { margin-top: 0.8rem; }
+  body.sg-printing .sg-pair-panel::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    margin-bottom: 0.35rem;
+  }
+  /* No spinner artifacts in the export. */
+  body.sg-printing .sg-h2-regenerating { opacity: 1; }
+  body.sg-printing .sg-h2-regenerating svg { display: none; }
+}

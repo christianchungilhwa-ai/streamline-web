@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { listLectures, type Lecture } from "@/lib/api";
+import {
+  listLectures,
+  renameLecture,
+  deleteLecture,
+  ApiError,
+  type Lecture,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { cn } from "@/lib/utils";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -16,6 +29,9 @@ import {
   ChevronDown,
   Check,
   X,
+  MoreVertical,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 /** Lectures library — the landing page.
@@ -26,7 +42,9 @@ import {
  *  - Toolbar: NotebookLM-style row — filter chips (All / My Projects
  *    / Shared with me) on the left, search-icon + view toggle + sort
  *    dropdown on the right
- *  - Body: card grid or list, depending on the view toggle
+ *  - Body: card grid or list, depending on the view toggle. Every
+ *    lecture carries a kebab menu (Rename / Delete) — the web analog
+ *    of the Mac app's long-press context menu on a project row
  *
  *  URL state:
  *  - `?new=1` opens the NewProjectDialog (lets us preserve the old
@@ -43,6 +61,15 @@ import {
 type Filter = "all" | "mine" | "shared";
 type View = "grid" | "list";
 type Sort = "recent" | "oldest" | "alpha";
+
+/** Which row-action dialog is up. `open: false` keeps the target lecture
+ *  mounted through the dialog's exit animation instead of unmounting it
+ *  mid-fade. */
+type LectureAction = {
+  kind: "rename" | "delete";
+  lecture: Lecture;
+  open: boolean;
+};
 
 const SORT_OPTIONS: { value: Sort; label: string }[] = [
   { value: "recent", label: "Most recent" },
@@ -63,6 +90,8 @@ export function LecturesPage() {
   const [sort, setSort] = useState<Sort>("recent");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [action, setAction] = useState<LectureAction | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const filterParam = searchParams.get("filter");
   const filter: Filter =
@@ -91,6 +120,28 @@ export function LecturesPage() {
       alive = false;
     };
   }, []);
+
+  const closeAction = () => setAction((a) => (a ? { ...a, open: false } : a));
+
+  /** Optimistic rename — apply the new name locally right away (same
+   *  instant feedback as the Mac app's local store save), then PATCH.
+   *  On failure, revert just this lecture's name and surface the error. */
+  function applyRename(lecture: Lecture, name: string) {
+    setActionError(null);
+    setLectures(
+      (ls) => ls?.map((l) => (l.id === lecture.id ? { ...l, name } : l)) ?? ls,
+    );
+    renameLecture(lecture.id, name).catch((e: unknown) => {
+      setLectures(
+        (ls) =>
+          ls?.map((l) =>
+            l.id === lecture.id ? { ...l, name: lecture.name } : l,
+          ) ?? ls,
+      );
+      const msg = e instanceof ApiError ? e.message : String(e);
+      setActionError(`Rename failed: ${msg}`);
+    });
+  }
 
   /** Derived: lectures after filter + search + sort. */
   const displayed = useMemo(() => {
@@ -153,6 +204,20 @@ export function LecturesPage() {
         </div>
       )}
 
+      {actionError && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss"
+            className="rounded-full p-1 transition-colors hover:bg-destructive/15"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {displayed === null && !error && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -195,13 +260,40 @@ export function LecturesPage() {
 
       {displayed && displayed.length > 0 && (
         view === "grid" ? (
-          <LectureGrid lectures={displayed} />
+          <LectureGrid
+            lectures={displayed}
+            onRename={(l) => setAction({ kind: "rename", lecture: l, open: true })}
+            onDelete={(l) => setAction({ kind: "delete", lecture: l, open: true })}
+          />
         ) : (
-          <LectureList lectures={displayed} />
+          <LectureList
+            lectures={displayed}
+            onRename={(l) => setAction({ kind: "rename", lecture: l, open: true })}
+            onDelete={(l) => setAction({ kind: "delete", lecture: l, open: true })}
+          />
         )
       )}
 
       <NewProjectDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+
+      {action?.kind === "rename" && (
+        <RenameLectureDialog
+          lecture={action.lecture}
+          open={action.open}
+          onOpenChange={(open) => !open && closeAction()}
+          onSave={(name) => applyRename(action.lecture, name)}
+        />
+      )}
+      {action?.kind === "delete" && (
+        <DeleteLectureDialog
+          lecture={action.lecture}
+          open={action.open}
+          onOpenChange={(open) => !open && closeAction()}
+          onDeleted={(id) =>
+            setLectures((ls) => ls?.filter((l) => l.id !== id) ?? ls)
+          }
+        />
+      )}
     </div>
   );
 }
@@ -440,26 +532,39 @@ function SortDropdown({
 
 // ─── Lecture renderings ─────────────────────────────────────────────────
 
-function LectureGrid({ lectures }: { lectures: Lecture[] }) {
+interface LectureRowActions {
+  onRename: (l: Lecture) => void;
+  onDelete: (l: Lecture) => void;
+}
+
+function LectureGrid({
+  lectures,
+  onRename,
+  onDelete,
+}: { lectures: Lecture[] } & LectureRowActions) {
   return (
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
       {lectures.map((l) => (
         <li key={l.id}>
-          <LectureCard lecture={l} />
+          <LectureCard lecture={l} onRename={onRename} onDelete={onDelete} />
         </li>
       ))}
     </ul>
   );
 }
 
-function LectureList({ lectures }: { lectures: Lecture[] }) {
+function LectureList({
+  lectures,
+  onRename,
+  onDelete,
+}: { lectures: Lecture[] } & LectureRowActions) {
   return (
     <ul className="space-y-2">
       {lectures.map((l) => (
-        <li key={l.id}>
+        <li key={l.id} className="relative">
           <Link
             to={`/lectures/${l.id}`}
-            className="flex items-center gap-4 rounded-xl border border-border bg-card p-3 transition-colors hover:bg-accent"
+            className="flex items-center gap-4 rounded-xl border border-border bg-card p-3 pr-14 transition-colors hover:bg-accent"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5">
               <Film className="h-5 w-5 text-primary/80" />
@@ -474,33 +579,45 @@ function LectureList({ lectures }: { lectures: Lecture[] }) {
             </div>
             <StatusPill status={l.status} />
           </Link>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <LectureActionsMenu lecture={l} onRename={onRename} onDelete={onDelete} />
+          </div>
         </li>
       ))}
     </ul>
   );
 }
 
-function LectureCard({ lecture }: { lecture: Lecture }) {
+function LectureCard({
+  lecture,
+  onRename,
+  onDelete,
+}: { lecture: Lecture } & LectureRowActions) {
   return (
-    <Link
-      to={`/lectures/${lecture.id}`}
-      className="group flex h-[240px] flex-col overflow-hidden rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
-    >
-      <div className="relative flex h-[120px] items-center justify-center bg-gradient-to-br from-primary/15 to-primary/5">
-        <Film className="h-9 w-9 text-primary/80 transition-transform group-hover:scale-110" />
-        <div className="absolute right-2 top-2">
-          <StatusPill status={lecture.status} />
+    <div className="group relative rounded-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+      <Link
+        to={`/lectures/${lecture.id}`}
+        className="flex h-[240px] flex-col overflow-hidden rounded-xl border border-border bg-card"
+      >
+        <div className="relative flex h-[120px] items-center justify-center bg-gradient-to-br from-primary/15 to-primary/5">
+          <Film className="h-9 w-9 text-primary/80 transition-transform group-hover:scale-110" />
+          <div className="absolute right-2 top-2">
+            <StatusPill status={lecture.status} />
+          </div>
         </div>
+        <div className="flex flex-1 flex-col px-3 py-3">
+          <div className="truncate text-sm font-semibold text-foreground">
+            {lecture.name}
+          </div>
+          <div className="mt-auto pt-2 pr-8 text-xs text-muted-foreground">
+            {new Date(lecture.createdAt).toLocaleDateString()}
+          </div>
+        </div>
+      </Link>
+      <div className="absolute bottom-2 right-2">
+        <LectureActionsMenu lecture={lecture} onRename={onRename} onDelete={onDelete} />
       </div>
-      <div className="flex flex-1 flex-col px-3 py-3">
-        <div className="truncate text-sm font-semibold text-foreground">
-          {lecture.name}
-        </div>
-        <div className="mt-auto pt-2 text-xs text-muted-foreground">
-          {new Date(lecture.createdAt).toLocaleDateString()}
-        </div>
-      </div>
-    </Link>
+    </div>
   );
 }
 
@@ -519,5 +636,233 @@ function StatusPill({ status }: { status: string }) {
     >
       {status}
     </span>
+  );
+}
+
+// ─── Row actions: rename / delete ───────────────────────────────────────
+
+/** Kebab menu with the per-lecture actions. Rendered as a SIBLING of the
+ *  row's Link (absolutely positioned over it), never inside it — nesting
+ *  a button in an anchor breaks keyboard/AT semantics. */
+function LectureActionsMenu({
+  lecture,
+  onRename,
+  onDelete,
+}: { lecture: Lecture } & LectureRowActions) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          aria-label={`Actions for ${lecture.name}`}
+          className={cn(
+            "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground",
+            "transition-colors hover:bg-accent hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            "data-[state=open]:bg-accent data-[state=open]:text-foreground",
+          )}
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={6}
+          className="z-50 min-w-[160px] rounded-xl border border-border bg-card p-1 text-sm shadow-lg"
+        >
+          <DropdownMenu.Item
+            onSelect={() => onRename(lecture)}
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2",
+              "outline-none transition-colors",
+              "data-[highlighted]:bg-accent data-[highlighted]:text-foreground",
+            )}
+          >
+            <Pencil className="h-4 w-4" />
+            <span>Rename</span>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            onSelect={() => onDelete(lecture)}
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-destructive",
+              "outline-none transition-colors",
+              "data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive",
+            )}
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>Delete</span>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+/** Rename modal — mirrors the Mac app's "Rename Project" alert: seeded
+ *  with the current name, trims whitespace, rejects empty names, and
+ *  treats an unchanged name as a no-op success (close, no request). */
+function RenameLectureDialog({
+  lecture,
+  open,
+  onOpenChange,
+  onSave,
+}: {
+  lecture: Lecture;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (name: string) => void;
+}) {
+  const [draft, setDraft] = useState(lecture.name);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Fresh draft on every open (parity with the Mac alert, which is
+  // remounted per open so its TextField never carries stale state).
+  useEffect(() => {
+    if (open) {
+      setDraft(lecture.name);
+      setFormError(null);
+    }
+  }, [open, lecture]);
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      setFormError("Name can't be empty.");
+      return;
+    }
+    if (trimmed !== lecture.name) onSave(trimmed);
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Rename Project</DialogTitle>
+          <DialogDescription>
+            Enter a new name for this lecture.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={onSubmit} className="mt-2 space-y-4">
+          <input
+            autoFocus
+            type="text"
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setFormError(null);
+            }}
+            onFocus={(e) => e.currentTarget.select()}
+            placeholder="Project name"
+            aria-label="Project name"
+            maxLength={200}
+            className={cn(
+              "block w-full rounded-2xl border border-border bg-card px-5 py-4",
+              "text-base text-foreground placeholder:text-muted-foreground",
+              "transition-colors",
+              "focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+              formError &&
+                "border-destructive/60 focus-visible:border-destructive focus-visible:ring-destructive/30",
+            )}
+          />
+          {formError && <p className="text-sm text-destructive">{formError}</p>}
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              className="text-primary hover:text-primary"
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Save</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Delete confirmation — names the lecture so there's no ambiguity about
+ *  what's going away. Unlike rename, the removal is NOT optimistic: the
+ *  DELETE is awaited (spinner on the button) so a failed delete never
+ *  vanishes a row that still exists on the server. */
+function DeleteLectureDialog({
+  lecture,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  lecture: Lecture;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setBusy(false);
+      setDeleteError(null);
+    }
+  }, [open, lecture]);
+
+  async function confirmDelete() {
+    setBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteLecture(lecture.id);
+      onDeleted(lecture.id);
+      onOpenChange(false);
+    } catch (e: unknown) {
+      setDeleteError(e instanceof ApiError ? e.message : String(e));
+      setBusy(false);
+    }
+  }
+
+  function handleOpenChange(next: boolean) {
+    if (busy && !next) return;
+    onOpenChange(next);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Project</DialogTitle>
+          <DialogDescription>
+            {`Delete "${lecture.name}"? This can't be undone.`}
+          </DialogDescription>
+        </DialogHeader>
+        {deleteError && (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {deleteError}
+          </div>
+        )}
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => handleOpenChange(false)}
+            disabled={busy}
+            className="text-primary hover:text-primary"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={confirmDelete}
+            disabled={busy}
+          >
+            {busy && <Loader2 className="animate-spin" />}
+            {busy ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

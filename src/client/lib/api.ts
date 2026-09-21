@@ -314,32 +314,172 @@ export function assetUrl(lectureId: string, filename: string): string {
   return `${API_BASE}/api/streamline/lectures/${lectureId}/asset/${encodeURI(filename)}`;
 }
 
+/** Files at or below this size go up as one legacy PUT (fewer
+ *  round-trips; comfortably inside Railway's edge cap on any real
+ *  uplink). Mirrors the Mac S3Uploader's `chunkThreshold`. */
+const CHUNK_THRESHOLD = 16 * 1024 * 1024;
+/** Chunk size for large files. 16 MB ≈ 13 s at 10 Mbps, ~2 min at
+ *  1 Mbps — always far below the ~300 s edge cap. */
+const CHUNK_SIZE = 16 * 1024 * 1024;
+const MAX_UPLOAD_ATTEMPTS = 3;
+
 /**
  * Upload a file (PUT, raw body) directly to streamline-server using a
  * pre-shared URL returned by `createLecture`. These URLs already point
  * at streamline-server (NOT Claraity-web), and the streamline-server's
  * `allow_origins=["*"]` config allows the browser to PUT directly.
  *
- * Returns a Promise that resolves on completion (one progress callback
- * per upload chunk, derived from the XHR `progress` event).
+ * Mirrors the Mac S3Uploader: files over 16 MB upload as SEQUENTIAL
+ * 16 MB chunks, each a separate PUT with `&offset=&total=` appended to
+ * the (already `?token=`-carrying) URL. This exists because Railway's
+ * edge proxy hard-kills any single request at ~300 s — a multi-GB
+ * video on a residential uplink can never finish in one PUT (that's
+ * the "Upload failed: HTTP 502" failure). Chunks small enough to
+ * finish well inside the cap make total upload time unbounded, and a
+ * mid-upload failure only re-sends one chunk instead of restarting
+ * the whole file from byte 0.
+ *
+ * Each request retries up to 3 attempts on transient failures (HTTP
+ * 5xx, network error, timeout) with attempt*2s backoff. An HTTP 409
+ * means our offset doesn't match the bytes on the server's disk — its
+ * body says "Resume from offset N", and the chunk loop restarts there.
+ *
+ * `onProgress` reports whole-file progress: bytes completed in prior
+ * chunks + the in-flight XHR's sent bytes, over the full file size.
  */
+/** Message carried by the ApiError a deliberately-aborted upload rejects
+ *  with — callers use it to tell "we cancelled this" apart from a real
+ *  failure (an aborted sibling must never repaint error state). */
+export const UPLOAD_ABORTED = "upload aborted";
+
+export function isUploadAborted(e: unknown): boolean {
+  return e instanceof ApiError && e.message === UPLOAD_ABORTED;
+}
+
 export function uploadFile(
   url: string,
   file: File,
   onProgress?: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const contentType = file.type || "application/octet-stream";
+  if (file.size <= CHUNK_THRESHOLD) {
+    return putRetrying(url, file, contentType, onProgress, signal);
+  }
+  return uploadChunked(url, file, contentType, onProgress, signal);
+}
+
+async function uploadChunked(
+  url: string,
+  file: File,
+  contentType: string,
+  onProgress?: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const total = file.size;
+  let offset = 0;
+  while (offset < total) {
+    if (signal?.aborted) throw new ApiError(0, UPLOAD_ABORTED);
+    const chunk = file.slice(offset, Math.min(offset + CHUNK_SIZE, total));
+    const base = offset;
+    try {
+      await putRetrying(
+        `${url}&offset=${offset}&total=${total}`,
+        chunk,
+        contentType,
+        (loaded) => {
+          if (onProgress) onProgress(Math.min(base + loaded, total), total);
+        },
+        signal,
+      );
+    } catch (e) {
+      const resume = resumeOffsetFrom409(e);
+      if (resume === null || resume >= total) throw e;
+      offset = resume;
+      continue;
+    }
+    offset += chunk.size;
+    if (onProgress) onProgress(offset, total);
+  }
+}
+
+/** PUT with up to 3 attempts. Transient failures (HTTP 5xx, network
+ *  error, timeout) back off attempt*2s and retry — the server truncates
+ *  a retried chunk back to its offset, so re-sending is always safe.
+ *  Anything else (4xx incl. 409) throws immediately, as does an abort. */
+async function putRetrying(
+  url: string,
+  body: Blob,
+  contentType: string,
+  onProgress?: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await putOnce(url, body, contentType, onProgress, signal);
+      return;
+    } catch (e) {
+      if (isUploadAborted(e)) throw e;
+      if (!isTransientUploadError(e) || attempt >= MAX_UPLOAD_ATTEMPTS) throw e;
+      await sleep(attempt * 2000);
+    }
+  }
+}
+
+/** One PUT of `body`. Chunk PUTs answer
+ *  `{jobId, kind, bytes, chunkBytes, complete}`; we track offsets
+ *  locally (like the Mac uploader) so the body is only kept for the
+ *  409 resume hint. */
+function putOnce(
+  url: string,
+  body: Blob,
+  contentType: string,
+  onProgress?: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new ApiError(0, UPLOAD_ABORTED));
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener("abort", onAbort);
+    const settle = (fn: () => void) => {
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    };
     xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.timeout = 600_000;
+    xhr.setRequestHeader("Content-Type", contentType);
     xhr.upload.onprogress = (e) => {
       if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new ApiError(xhr.status, `upload failed: ${xhr.status}`));
+      if (xhr.status >= 200 && xhr.status < 300) settle(resolve);
+      else settle(() => reject(new ApiError(xhr.status, `upload failed: ${xhr.status}`, xhr.responseText)));
     };
-    xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(file);
+    xhr.onabort = () => settle(() => reject(new ApiError(0, UPLOAD_ABORTED)));
+    xhr.onerror = () => settle(() => reject(new ApiError(0, "network error during upload")));
+    xhr.ontimeout = () => settle(() => reject(new ApiError(0, "upload timed out")));
+    xhr.send(body);
   });
+}
+
+function isTransientUploadError(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 0 || e.status >= 500);
+}
+
+/** A 409 chunk response carries "Resume from offset N" in its body
+ *  (raw FastAPI `{detail}` — uploads bypass the Claraity-web proxy).
+ *  Returns N, or null if `e` isn't a parseable 409. */
+function resumeOffsetFrom409(e: unknown): number | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const text = typeof e.body === "string" ? e.body : JSON.stringify(e.body ?? "");
+  const m = /Resume from offset (\d+)/.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
