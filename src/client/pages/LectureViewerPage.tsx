@@ -3,6 +3,7 @@ import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   getLecture,
   getLectureStatus,
+  startLecture,
   assetUrl,
   type LectureDetail,
   type StatusResponse,
@@ -41,6 +42,10 @@ export function LectureViewerPage() {
 
   const [detail, setDetail] = useState<LectureDetail | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  // Bumped to restart the polling loop after a retry re-starts the job.
+  const [pollNonce, setPollNonce] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
@@ -68,15 +73,16 @@ export function LectureViewerPage() {
         const d = await getLecture(id);
         if (!alive) return;
         setDetail(d);
-        if (
-          d.lecture.status !== "completed" &&
-          d.lecture.status !== "failed" &&
-          d.lecture.status !== "canceled"
-        ) {
+        if (d.lecture.status !== "completed") {
+          // Fetch status for failed/canceled too — it carries the error
+          // message (e.g. which phase died and why); only keep polling
+          // while the job is actually running.
           const s = await getLectureStatus(id);
           if (!alive) return;
           setStatus(s);
-          timer = window.setTimeout(tick, 4000);
+          if (d.lecture.status !== "failed" && d.lecture.status !== "canceled") {
+            timer = window.setTimeout(tick, 4000);
+          }
         }
       } catch (e: unknown) {
         if (alive) setError(String((e as Error)?.message ?? e));
@@ -87,7 +93,7 @@ export function LectureViewerPage() {
       alive = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [id]);
+  }, [id, pollNonce]);
 
   const project = (detail?.project ?? null) as LectureProject | null;
   const playback = usePlaybackSync(videoRef, project);
@@ -160,6 +166,40 @@ export function LectureViewerPage() {
           {status?.error && <div className="mt-3 text-sm text-destructive">{status.error}</div>}
           {detail.projectError && (
             <div className="mt-3 text-xs text-muted-foreground">{detail.projectError}</div>
+          )}
+          {(detail.lecture.status === "failed" || detail.lecture.status === "canceled") && (
+            <div className="mt-4">
+              <Button
+                onClick={async () => {
+                  setRetrying(true);
+                  setRetryError(null);
+                  try {
+                    // No roi argument: the server keeps the userRoi
+                    // persisted at the original start.
+                    await startLecture(detail.lecture.id);
+                    setStatus(null);
+                    setDetail({
+                      ...detail,
+                      lecture: { ...detail.lecture, status: "processing" },
+                    });
+                    setPollNonce((n) => n + 1);
+                  } catch (e: unknown) {
+                    setRetryError(String((e as Error)?.message ?? e));
+                  } finally {
+                    setRetrying(false);
+                  }
+                }}
+                disabled={retrying}
+              >
+                {retrying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Retry processing
+              </Button>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Resumes from the last checkpoint — the uploaded video and PDF are
+                still on the server, so nothing re-uploads.
+              </div>
+              {retryError && <div className="mt-2 text-sm text-destructive">{retryError}</div>}
+            </div>
           )}
         </div>
       </div>
