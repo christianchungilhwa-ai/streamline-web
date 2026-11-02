@@ -244,6 +244,62 @@ html, body, #root {
 .studyguide-prose th { background: var(--muted); font-weight: 600; }
 .studyguide-prose img { max-width: 100%; border-radius: 8px; margin: 0.8rem 0; }
 
+/* ---- AI notes prose ----
+   NotesMarkdown output. Notes are titled sections (a plain line followed
+   by a bullet list), separated by `---`, with nested bullets and a
+   four-tier emphasis scale: italic < bold < <mark> < hl-red. Compact
+   sizing to sit beside the transcript panel. */
+.notes-prose {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.notes-prose > :first-child { margin-top: 0; }
+.notes-prose p { margin: 0.5rem 0; }
+/* A top-level line directly followed by a list is a section title. */
+.notes-prose > p:has(+ ul),
+.notes-prose > p:has(+ ol) { font-weight: 650; margin: 1rem 0 0.35rem; }
+.notes-prose > :first-child:has(+ ul) { margin-top: 0; }
+.notes-prose h1,
+.notes-prose h2,
+.notes-prose h3,
+.notes-prose h4 { font-size: 0.95rem; font-weight: 650; margin: 1rem 0 0.35rem; }
+.notes-prose ul,
+.notes-prose ol { margin: 0.25rem 0; padding-left: 1.25rem; }
+.notes-prose ul { list-style: disc; }
+.notes-prose ul ul { list-style: circle; }
+.notes-prose ul ul ul { list-style: square; }
+.notes-prose ol { list-style: decimal; }
+.notes-prose li { margin: 0.2rem 0; }
+.notes-prose li::marker { color: var(--muted-foreground); }
+.notes-prose hr { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }
+.notes-prose strong { font-weight: 650; }
+.notes-prose a { color: var(--primary); text-decoration: underline; }
+.notes-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--muted);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+.notes-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.8rem;
+  color: var(--muted-foreground);
+}
+.notes-prose table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; }
+.notes-prose th,
+.notes-prose td { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; }
+.notes-prose mark {
+  background: rgba(250, 204, 21, 0.38);
+  color: inherit;
+  padding: 0.05em 0.15em;
+  border-radius: 3px;
+}
+.notes-prose .notes-hl-red { color: #dc2626; font-weight: 600; }
+.dark .notes-prose mark { background: rgba(250, 204, 21, 0.24); }
+.dark .notes-prose .notes-hl-red { color: #f87171; }
+
 /* ---- Studyguide structured visuals ----
    Styling for the resolved-studyguide components (DrawioDiagram +
    SgPairTabs). Mirrors the Mac app's StudyguideView CSS vocabulary

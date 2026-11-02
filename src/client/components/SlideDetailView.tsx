@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
 import { PDFPageView } from "@/components/PDFPageView";
+import { NotesMarkdown } from "@/components/NotesMarkdown";
 
 export interface SlideDetailViewProps {
   lectureId: string;
@@ -155,15 +156,13 @@ export function SlideDetailView({
             />
           </section>
 
-          {/* AI Notes (compact — full markdown rendering is Phase C+) */}
+          {/* AI Notes */}
           {note.aiNotes && (
             <section>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 AI notes
               </h3>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                {note.aiNotes}
-              </div>
+              <NotesMarkdown markdown={note.aiNotes} />
             </section>
           )}
         </div>
