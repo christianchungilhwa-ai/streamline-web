@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   getLecture,
@@ -8,7 +8,7 @@ import {
   type LectureDetail,
   type StatusResponse,
 } from "@/lib/api";
-import type { LectureProject } from "@/lib/types";
+import { normalizeProject } from "@/lib/project";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Loader2, Sparkles, FileText, LayoutList } from "lucide-react";
@@ -95,7 +95,9 @@ export function LectureViewerPage() {
     };
   }, [id, pollNonce]);
 
-  const project = (detail?.project ?? null) as LectureProject | null;
+  // Memoized so usePlaybackSync and the auto-scroll effect see a stable
+  // object between renders, as they did with the raw cast.
+  const project = useMemo(() => normalizeProject(detail?.project ?? null), [detail?.project]);
   const playback = usePlaybackSync(videoRef, project);
 
   // Auto-scroll to the active slide. Toggle gives the user manual
