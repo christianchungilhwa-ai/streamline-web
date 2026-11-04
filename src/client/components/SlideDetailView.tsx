@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Video, VideoOff, ArrowDownUp, Sparkles } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Video, VideoOff, ArrowDownUp, Sparkles, Play } from "lucide-react";
 import type { SlideNote, TranscriptWord } from "@/lib/types";
 import { assetUrl } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatTimestamp } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
 import { PDFPageView } from "@/components/PDFPageView";
@@ -59,6 +59,10 @@ export function SlideDetailView({
   const useAnnotated = annOn && !!note.editedSlideKey;
   const useVideoFrame = !useAnnotated && note.pdfPageIndex === null && !!note.videoFrameKey;
   const usePdfPage = !useAnnotated && note.pdfPageIndex !== null;
+  // Where the slide is first shown in the recording; clicking the slide
+  // (or this time) jumps the video there. null for slides never presented.
+  const visits = note.transcriptVisits ?? [];
+  const firstShown = visits.length ? Math.min(...visits.map((v) => v.startTime)) : null;
 
   return (
     <article
@@ -74,6 +78,17 @@ export function SlideDetailView({
         <span className="font-mono font-semibold text-muted-foreground">
           Slide {note.slideIndex + 1}
         </span>
+        {firstShown !== null && (
+          <button
+            type="button"
+            onClick={() => onSeekTo(firstShown)}
+            title="Play the video from this slide"
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-mono font-medium text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <Play className="h-3 w-3" />
+            {formatTimestamp(firstShown)}
+          </button>
+        )}
         {note.isReordered && (
           <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 font-medium text-orange-600 dark:text-orange-400">
             <ArrowDownUp className="h-3 w-3" />
@@ -112,7 +127,11 @@ export function SlideDetailView({
 
       {/* Two-column body: image on left, transcript+notes on right */}
       <div className="grid gap-5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="min-w-0">
+        <SeekOnClick
+          at={firstShown}
+          label={`Play the video from slide ${note.slideIndex + 1}`}
+          onSeekTo={onSeekTo}
+        >
           {useAnnotated && note.editedSlideKey && (
             <img
               src={assetUrl(lectureId, note.editedSlideKey)}
@@ -141,7 +160,7 @@ export function SlideDetailView({
               No slide image
             </div>
           )}
-        </div>
+        </SeekOnClick>
 
         <div className="min-w-0 space-y-4">
           {/* Transcript */}
@@ -168,6 +187,38 @@ export function SlideDetailView({
         </div>
       </div>
     </article>
+  );
+}
+
+/** The slide image column. When the slide was presented, the whole image
+ *  is a button that seeks the video to `at`, with a play badge on hover /
+ *  keyboard focus; otherwise a plain container. */
+function SeekOnClick({
+  at,
+  label,
+  onSeekTo,
+  children,
+}: {
+  at: number | null;
+  label: string;
+  onSeekTo: (t: number) => void;
+  children: ReactNode;
+}) {
+  if (at === null) return <div className="min-w-0">{children}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => onSeekTo(at)}
+      title={label}
+      aria-label={`${label} (${formatTimestamp(at)})`}
+      className="group relative block w-full min-w-0 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      {children}
+      <span className="pointer-events-none absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 font-mono text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        <Play className="h-3 w-3" />
+        {formatTimestamp(at)}
+      </span>
+    </button>
   );
 }
 
