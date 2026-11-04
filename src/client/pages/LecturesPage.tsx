@@ -244,7 +244,7 @@ export function LecturesPage() {
             <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
             <h2 className="mt-4 text-lg font-medium">No Projects yet</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Upload your first PDF + recording to get started.
+              Upload your first recording (with its slide deck, if you have it) to get started.
             </p>
             <Button onClick={() => setDialogOpen(true)} className="mt-4">
               <Plus />

@@ -120,7 +120,7 @@ export function SlideDetailView({
           <VideoOff className="h-4 w-4 shrink-0" />
           <span className="font-medium">Not covered in this recording</span>
           <span className="text-xs text-orange-600/80 dark:text-orange-400/80">
-            — slide is in the PDF but the speaker did not present it
+            — slide is in the deck but the speaker did not present it
           </span>
         </div>
       )}

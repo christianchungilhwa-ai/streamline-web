@@ -127,4 +127,10 @@ export interface LectureProject {
   processingState: string;
   videoDuration: number;
   pdfPageCount: number;
+  /** Where slides.pdf came from: the user's upload (PDF, or PowerPoint
+   *  converted server-side) or extracted from the recording. Absent on
+   *  projects processed before this field existed (= "upload"). */
+  slideSource?: SlideSource;
 }
+
+export type SlideSource = "upload" | "extract";

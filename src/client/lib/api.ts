@@ -13,7 +13,7 @@
  * All helpers below throw `ApiError` on non-2xx responses.
  */
 
-import type { ROIRegion } from "./types";
+import type { ROIRegion, SlideSource } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -91,6 +91,9 @@ export interface StatusResponse {
   step?: string;
   progress?: number;
   error?: string;
+  /** "slides": the job failed because its deck couldn't be read, converted
+   *  or extracted — restarting the same job would fail the same way. */
+  errorKind?: string | null;
 }
 
 export interface LectureDetail {
@@ -138,10 +141,15 @@ export function createLecture(name: string) {
   });
 }
 
-export function startLecture(id: string, roi?: ROIRegion) {
+/** Start (or restart) processing. `slideSource`: "upload" when a deck was
+ *  uploaded, "extract" to have the server build the deck from the
+ *  recording. Omitted (e.g. the viewer's Retry), the server keeps the
+ *  mode the job was first started with. */
+export function startLecture(id: string, roi?: ROIRegion, slideSource?: SlideSource) {
+  const body = { ...(roi ? { roi } : {}), ...(slideSource ? { slideSource } : {}) };
   return request<{ jobId: string; executionArn?: string }>(`/api/streamline/lectures/${id}/start`, {
     method: "POST",
-    body: roi ? JSON.stringify({ roi }) : undefined,
+    body: Object.keys(body).length ? JSON.stringify(body) : undefined,
   });
 }
 
@@ -312,6 +320,24 @@ function parseSseFrame(raw: string): StudyguideEvent | null {
  *  shared session cookie. */
 export function assetUrl(lectureId: string, filename: string): string {
   return `${API_BASE}/api/streamline/lectures/${lectureId}/asset/${encodeURI(filename)}`;
+}
+
+/** Save the lecture's slides.pdf (the uploaded deck, a converted
+ *  PowerPoint, or the deck extracted from the recording) as `filename`.
+ *  Fetched as a blob: the API is on another origin, where browsers ignore
+ *  `<a download>` and would just open the PDF in the tab. */
+export async function downloadSlidesPdf(lectureId: string, filename: string): Promise<void> {
+  const res = await fetch(assetUrl(lectureId, "slides.pdf"), { credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, `Slide deck download failed (HTTP ${res.status})`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke after the click has handed the blob to the download manager.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** Files at or below this size go up as one legacy PUT (fewer

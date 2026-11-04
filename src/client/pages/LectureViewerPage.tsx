@@ -5,13 +5,15 @@ import {
   getLectureStatus,
   startLecture,
   assetUrl,
+  downloadSlidesPdf,
   type LectureDetail,
   type StatusResponse,
 } from "@/lib/api";
 import { normalizeProject } from "@/lib/project";
+import { stepLabel } from "@/lib/steps";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Loader2, Sparkles, FileText, LayoutList } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Sparkles, FileText, LayoutList } from "lucide-react";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { SlideDetailView } from "@/components/SlideDetailView";
 import { StudyguidePanel } from "@/components/StudyguidePanel";
@@ -49,6 +51,8 @@ export function LectureViewerPage() {
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
+  const [deckDownloading, setDeckDownloading] = useState(false);
+  const [deckError, setDeckError] = useState<string | null>(null);
 
   // Slides ↔ Studyguide view. URL-synced via ?tab=studyguide so the
   // My Studyguides list can deep-link straight into the guide.
@@ -151,7 +155,7 @@ export function LectureViewerPage() {
           <div className="text-sm font-semibold capitalize text-foreground">{detail.lecture.status}</div>
           {status?.step && (
             <div className="mt-1 text-xs text-muted-foreground">
-              step: {status.step}
+              {stepLabel(status.step)}
               {typeof status.progress === "number"
                 ? ` (${Math.round(status.progress * 100)}%)`
                 : ""}
@@ -171,7 +175,22 @@ export function LectureViewerPage() {
           )}
           {(detail.lecture.status === "failed" || detail.lecture.status === "canceled") && (
             <div className="mt-4">
+              {status?.errorKind === "slides" && (
+                // The deck (or the recording's slides) couldn't be used: the
+                // same job would fail the same way, so lead with a new project.
+                <div className="mb-3">
+                  <Link to="/lectures?new=1">
+                    <Button>New project</Button>
+                  </Link>
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Retrying this project will most likely fail the same way. Start a new one —
+                    with the deck as a PDF, or without a deck to extract the slides from the
+                    recording.
+                  </div>
+                </div>
+              )}
               <Button
+                variant={status?.errorKind === "slides" ? "ghost" : "default"}
                 onClick={async () => {
                   setRetrying(true);
                   setRetryError(null);
@@ -197,8 +216,8 @@ export function LectureViewerPage() {
                 Retry processing
               </Button>
               <div className="mt-2 text-xs text-muted-foreground">
-                Resumes from the last checkpoint — the uploaded video and PDF are
-                still on the server, so nothing re-uploads.
+                Resumes from the last checkpoint — the uploaded files are still on
+                the server, so nothing re-uploads.
               </div>
               {retryError && <div className="mt-2 text-sm text-destructive">{retryError}</div>}
             </div>
@@ -209,6 +228,21 @@ export function LectureViewerPage() {
   }
 
   // ---- Completed: rich viewer ----------------------------------------------
+  const extracted = project.slideSource === "extract";
+  async function downloadDeck() {
+    if (!id || !detail) return;
+    setDeckDownloading(true);
+    setDeckError(null);
+    try {
+      const base = (detail.lecture.name || "Lecture").replace(/[\\/:*?"<>|]+/g, "-").trim();
+      await downloadSlidesPdf(id, `${base}${extracted ? " (extracted slides)" : ""}.pdf`);
+    } catch (e: unknown) {
+      setDeckError(String((e as Error)?.message ?? e));
+    } finally {
+      setDeckDownloading(false);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between gap-4 border-b border-border bg-card/85 px-4 py-3 backdrop-blur-xl md:px-6">
@@ -222,6 +256,30 @@ export function LectureViewerPage() {
           <h1 className="truncate text-lg font-semibold tracking-tight">{detail.lecture.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {/* Next to the button, so it shows in both the Slides and the
+              Studyguide view. */}
+          {deckError && (
+            <span className="max-w-[16rem] truncate text-xs text-destructive" title={deckError}>
+              {deckError}
+            </span>
+          )}
+          {/* The deck as a PDF: the upload, the converted PowerPoint, or the
+              deck extracted from the recording. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={downloadDeck}
+            disabled={deckDownloading}
+            title={
+              extracted
+                ? "Download the slide deck extracted from the recording (PDF)"
+                : "Download the slide deck (PDF)"
+            }
+          >
+            {deckDownloading ? <Loader2 className="animate-spin" /> : <Download />}
+            {extracted ? "Extracted deck" : "Slides PDF"}
+          </Button>
+
           {/* Slides / Studyguide view toggle. */}
           <div className="flex h-9 items-center rounded-full border border-border bg-card p-0.5">
             <ViewTab active={view === "slides"} onClick={() => setView("slides")}>
@@ -274,7 +332,8 @@ export function LectureViewerPage() {
               {project.slideNotes.length} slide
               {project.slideNotes.length === 1 ? "" : "s"} ·{" "}
               {formatDuration(project.videoDuration)} ·{" "}
-              {project.pdfPageCount} PDF page{project.pdfPageCount === 1 ? "" : "s"}
+              {project.pdfPageCount} {extracted ? "extracted " : ""}deck page
+              {project.pdfPageCount === 1 ? "" : "s"}
             </div>
           </aside>
 
