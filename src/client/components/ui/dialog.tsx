@@ -24,6 +24,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
@@ -57,11 +58,10 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        // Centered sheet — fixed on viewport, max-w-2xl by default.
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 gap-4",
-        "rounded-2xl border border-border bg-card p-6 shadow-2xl md:p-8",
-        // Mobile: leave a small breathing margin.
-        "max-h-[calc(100vh-2rem)] overflow-y-auto",
+        // Centered sheet, inset 1rem from the screen edges on phones.
+        "fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 gap-4",
+        "rounded-2xl border border-border bg-card p-5 shadow-overlay sm:p-6",
+        "max-h-[calc(100dvh-2rem)] overflow-y-auto",
         // Enter/exit anim — keyframes are in index.css.
         "data-[state=open]:animate-dialog-content-in",
         "data-[state=closed]:animate-dialog-content-out",
@@ -70,15 +70,10 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close
-        className={cn(
-          "absolute right-4 top-4 rounded-md p-1.5 text-muted-foreground",
-          "transition-colors hover:bg-accent hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-        )}
-        aria-label="Close"
-      >
-        <X className="h-4 w-4" />
+      <DialogPrimitive.Close asChild>
+        <Button variant="ghost" size="icon-xs" className="absolute right-4 top-4 text-muted-foreground" aria-label="Close">
+          <X />
+        </Button>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </DialogPortal>
@@ -90,11 +85,23 @@ const DialogHeader = ({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn("flex flex-col gap-1.5 text-center", className)}
+    className={cn("flex flex-col gap-1 pr-8 text-left", className)}
     {...props}
   />
 );
 DialogHeader.displayName = "DialogHeader";
+
+/** Right-aligned action row (stacked, primary on top, on phones). */
+const DialogFooter = ({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={cn("flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end", className)}
+    {...props}
+  />
+);
+DialogFooter.displayName = "DialogFooter";
 
 const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
@@ -102,7 +109,7 @@ const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("page-title text-center", className)}
+    className={cn("dialog-title", className)}
     {...props}
   />
 ));
@@ -128,6 +135,7 @@ export {
   DialogOverlay,
   DialogContent,
   DialogHeader,
+  DialogFooter,
   DialogTitle,
   DialogDescription,
 };
