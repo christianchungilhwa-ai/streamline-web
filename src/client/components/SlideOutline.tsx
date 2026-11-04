@@ -22,7 +22,13 @@ export function slideTitle(note: SlideNote): string {
       .split("\n")
       .map((l) => l.replace(MD_NOISE, "").trim())
       .find(Boolean);
-  const t = firstLine(note.aiNotes) ?? firstLine(note.slideOCRText) ?? `Slide ${note.slideIndex + 1}`;
+  // OCR text arrives normalized (all lowercase) — sentence-case it so the
+  // outline doesn't mix "Attendance Flexibility…" with "session 1 clinical…".
+  const ocr = firstLine(note.slideOCRText);
+  const t =
+    firstLine(note.aiNotes) ??
+    (ocr ? ocr.charAt(0).toUpperCase() + ocr.slice(1) : null) ??
+    `Slide ${note.slideIndex + 1}`;
   return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1).trimEnd()}…` : t;
 }
 

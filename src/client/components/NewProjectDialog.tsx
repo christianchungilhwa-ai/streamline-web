@@ -4,9 +4,14 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Callout } from "@/components/ui/callout";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
   createLecture,
   startLecture,
@@ -20,7 +25,7 @@ import {
 import type { ROIRegion, SlideSource } from "@/lib/types";
 import { RoiConfirm } from "@/components/RoiConfirm";
 import { cn } from "@/lib/utils";
-import { Loader2, FileText, Sparkles, Video, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, FileText, Sparkles, Video, X } from "lucide-react";
 
 type Phase = "idle" | "creating" | "uploading" | "roi" | "starting" | "done" | "error";
 
@@ -372,35 +377,50 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className={cn(inRoi && "sm:max-w-2xl")}>
         <DialogHeader>
-          <DialogTitle>{inRoi ? "Confirm slide region" : "New Project"}</DialogTitle>
+          <DialogTitle>{inRoi ? "Confirm slide region" : "New project"}</DialogTitle>
+          {!inRoi && (
+            <DialogDescription>
+              Add a lecture recording and, if you have it, its slide deck — Streamline lines them up
+              and writes notes for every slide.
+            </DialogDescription>
+          )}
         </DialogHeader>
 
         {inRoi && video ? (
           <>
             {extractDeck && (
-              <p className="text-xs text-muted-foreground">
-                The slide deck will be built from this region of the recording — frame
-                it tightly around the slides.
-              </p>
+              <Callout tone="info" icon={<Sparkles className="text-primary" />}>
+                The slide deck will be built from this region of the recording — frame it tightly
+                around the slides.
+              </Callout>
             )}
             {deckRejected && (
-              <div className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm">
-                <p className="text-destructive">{deckRejected}</p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => replaceDeckInputRef.current?.click()}
-                  >
-                    <FileText />
-                    Choose another deck…
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={dropDeckAndExtract}>
-                    <Sparkles />
-                    Remove deck — extract slides from the recording
-                  </Button>
-                </div>
+              <Callout
+                tone="danger"
+                icon={<AlertCircle />}
+                action={
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => replaceDeckInputRef.current?.click()}
+                    >
+                      <FileText />
+                      Choose another deck…
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={dropDeckAndExtract}>
+                      <Sparkles />
+                      Remove deck — extract slides from the recording
+                    </Button>
+                  </div>
+                }
+              >
+                {deckRejected}
+              </Callout>
+            )}
+            {deckRejected && (
+              <div className="hidden">
                 <input
                   ref={replaceDeckInputRef}
                   type="file"
@@ -415,9 +435,12 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
               </div>
             )}
             {phase === "starting" && deck && deckProgress > 0 && deckProgress < 1 && (
-              <p className="text-xs text-muted-foreground">
-                Uploading {deck.name}… {Math.round(deckProgress * 100)}%
-              </p>
+              <div className="space-y-1.5">
+                <p className="meta">
+                  Uploading {deck.name}… {Math.round(deckProgress * 100)}%
+                </p>
+                <Progress value={deckProgress * 100} label="Slide deck upload" />
+              </div>
             )}
             <RoiConfirm
               videoFile={video}
@@ -430,28 +453,26 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
             />
           </>
         ) : (
-          <form onSubmit={onSubmit} className="mt-4 space-y-5">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Project Name"
-              aria-label="Project name"
-              className={cn(
-                "block w-full rounded-2xl border border-border bg-card px-5 py-4",
-                "text-base text-foreground placeholder:text-muted-foreground",
-                "transition-colors",
-                "focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
-              )}
-              maxLength={200}
-              disabled={busy}
-            />
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="np-name" className="text-sm font-medium">
+                Name
+              </label>
+              <Input
+                id="np-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Renal physiology — lecture 12"
+                maxLength={200}
+                disabled={busy}
+              />
+            </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FileSelectCard
-                accent="sky"
-                title="Lecture Recording"
-                icon={<Video className="h-11 w-11" strokeWidth={2.2} />}
+                title="Recording"
+                hint="MP4 or MOV"
+                icon={<Video />}
                 accept="video/mp4,video/quicktime,video/*"
                 file={video}
                 onPick={setVideo}
@@ -459,10 +480,9 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
                 disabled={busy}
               />
               <FileSelectCard
-                accent="red"
-                title="Slide Deck"
+                title="Slide deck"
                 hint="Optional · PDF or PowerPoint"
-                icon={<FileText className="h-11 w-11" strokeWidth={2.2} />}
+                icon={<FileText />}
                 accept={DECK_ACCEPT}
                 file={deck}
                 onPick={(f) => void pickDeck(f)}
@@ -474,49 +494,52 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
             </div>
 
             {extractDeck && (
-              <div className="flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/[0.06] p-3">
-                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <div className="space-y-0.5">
-                  <p className="text-sm font-medium text-foreground">
-                    Extract &amp; Create Slide deck from the Video Recording
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    No deck? Streamline builds one from the slides shown in the recording
-                    (desktop, websites and other apps are left out). Download it as a PDF once
-                    processing finishes.
-                  </p>
-                </div>
-              </div>
+              <Callout
+                tone="info"
+                icon={<Sparkles className="text-primary" />}
+                title="Extract & Create Slide deck from the Video Recording"
+              >
+                No deck? Streamline builds one from the slides shown in the recording (desktop,
+                websites and other apps are left out). Download it as a PDF once processing finishes.
+              </Callout>
             )}
 
             {error && (
-              <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                <p>{error}</p>
-                {failedUpload && (
-                  <p className="mt-1 text-xs opacity-80">
-                    {failedUpload.kind === "video" ? "Recording" : "Slide deck"}{" "}
-                    &ldquo;{failedUpload.name}&rdquo; failed at {failedUpload.percent}% —
-                    Try again resumes with the same project.
-                  </p>
+              <Callout
+                tone="danger"
+                icon={<AlertCircle />}
+                title={failedUpload ? error : undefined}
+              >
+                {failedUpload ? (
+                  <>
+                    {failedUpload.kind === "video" ? "Recording" : "Slide deck"} &ldquo;
+                    {failedUpload.name}&rdquo; failed at {failedUpload.percent}% — Try again resumes
+                    with the same project.
+                  </>
+                ) : (
+                  error
                 )}
-              </div>
+              </Callout>
             )}
 
-            <div className="flex items-center justify-center gap-2 pt-2">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => handleOpenChange(false)}
-                disabled={busy}
-                className="text-primary hover:text-primary"
-              >
+            <DialogFooter>
+              {phase === "idle" && !video && (
+                <p id="np-hint" className="text-xs text-muted-foreground sm:mr-auto">
+                  Add the lecture recording to continue
+                </p>
+              )}
+              <Button type="button" variant="ghost" onClick={() => handleOpenChange(false)} disabled={busy}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitDisabled}>
+              <Button
+                type="submit"
+                disabled={submitDisabled}
+                aria-describedby={phase === "idle" && !video ? "np-hint" : undefined}
+              >
                 {busy && <Loader2 className="animate-spin" />}
                 {phaseLabel(phase)}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         )}
       </DialogContent>
@@ -546,9 +569,8 @@ function phaseLabel(p: Phase): string {
 /** Same FileSelectCard as the old UploadPage — kept private here
  *  since it's not used anywhere else. */
 function FileSelectCard({
-  accent,
   title,
-  hint = "Tap to select",
+  hint,
   icon,
   accept,
   file,
@@ -558,10 +580,9 @@ function FileSelectCard({
   progress,
   disabled,
 }: {
-  accent: "sky" | "red";
   title: string;
   /** Shown while no file is picked. */
-  hint?: string;
+  hint: string;
   icon: React.ReactNode;
   accept: string;
   file: File | null;
@@ -573,72 +594,79 @@ function FileSelectCard({
   progress: number | null;
   disabled: boolean;
 }) {
-  const cardTone =
-    accent === "sky"
-      ? "border-primary/50 bg-primary/[0.06] hover:border-primary/70 hover:bg-primary/10"
-      : "border-red-500/50 bg-red-500/[0.06] hover:border-red-500/70 hover:bg-red-500/10";
-  const iconTone =
-    accent === "sky" ? "text-primary" : "text-red-500";
-  const progressTone =
-    accent === "sky" ? "bg-primary" : "bg-red-500";
-
   return (
     // The remove button sits OUTSIDE the <label>: inside it, a <button> would
     // become the label's labeled control and every click on the card would
     // "remove" instead of opening the file picker.
     <div className="relative">
-    <label
-      className={cn(
-        "group relative flex min-h-[200px] cursor-pointer flex-col items-center justify-center",
-        "gap-3 overflow-hidden rounded-2xl border-2 border-dashed",
-        "px-6 py-10 text-center transition-all",
-        cardTone,
-        disabled && "pointer-events-none opacity-60",
-      )}
-    >
-      <span className={cn(iconTone)}>{icon}</span>
-      <span className="text-base font-semibold text-foreground">{title}</span>
-      {file ? (
-        <span className="line-clamp-1 max-w-full text-xs text-muted-foreground">
-          <span className="text-foreground">{file.name}</span>
-          <span> · {(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+      <label
+        className={cn(
+          "group relative flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2",
+          "overflow-hidden rounded-xl border border-dashed px-5 py-6 text-center transition-colors",
+          "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-card",
+          problem
+            ? "border-destructive/50 bg-destructive/5"
+            : file
+              ? "border-solid border-primary/60 bg-primary/5"
+              : "border-border bg-muted/40 hover:border-primary/50 hover:bg-primary/5",
+          disabled && "pointer-events-none opacity-60",
+        )}
+      >
+        {file && !problem && !onClear && (
+          <CheckCircle2 aria-hidden className="absolute right-2.5 top-2.5 size-4 text-primary" />
+        )}
+        <span
+          aria-hidden
+          className="flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary [&_svg]:size-6"
+        >
+          {icon}
         </span>
-      ) : (
-        <span className="text-xs text-muted-foreground">{hint}</span>
-      )}
-      {problem && <span className="text-xs text-destructive">{problem}</span>}
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+        {file ? (
+          <span className="line-clamp-1 max-w-full text-xs text-muted-foreground">
+            <span className="text-foreground">{file.name}</span>
+            <span className="tabular-nums"> · {(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+          </span>
+        ) : (
+          <span className="meta">{hint}</span>
+        )}
+        {problem && <span className="text-xs text-destructive-text">{problem}</span>}
 
-      {progress !== null && (
-        <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-black/10 dark:bg-white/10">
-          <div
-            className={cn("h-full transition-[width]", progressTone)}
-            style={{ width: `${Math.round(progress * 100)}%` }}
+        {progress !== null && (
+          <Progress
+            className="absolute inset-x-0 bottom-0 h-1 rounded-none"
+            value={progress * 100}
+            label={`${title} upload`}
           />
-        </div>
-      )}
+        )}
 
-      <input
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(e) => {
-          onPick(e.target.files?.[0] ?? null);
-          // Reset so picking the same file again (after removing it, or
-          // after a rejected pick) still fires onChange.
-          e.target.value = "";
-        }}
-        disabled={disabled}
-      />
-    </label>
+        {/* sr-only (not hidden) so Tab reaches the card; the ring above
+            shows its focus. */}
+        <input
+          type="file"
+          accept={accept}
+          className="sr-only"
+          aria-label={`Choose ${title.toLowerCase()} file`}
+          onChange={(e) => {
+            onPick(e.target.files?.[0] ?? null);
+            // Reset so picking the same file again (after removing it, or
+            // after a rejected pick) still fires onChange.
+            e.target.value = "";
+          }}
+          disabled={disabled}
+        />
+      </label>
       {file && onClear && !disabled && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-label={`Remove ${file.name}`}
-          className="absolute right-2 top-2 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground dark:hover:bg-white/10"
+          className="absolute right-2 top-2 text-muted-foreground"
           onClick={onClear}
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       )}
     </div>
   );
