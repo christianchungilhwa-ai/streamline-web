@@ -336,7 +336,7 @@ export function LecturesPage() {
           <EmptyState
             icon={<Film />}
             title="Your library is empty"
-            description="Add a lecture recording and its slides — Streamline lines them up and writes notes for every slide."
+            description="Add a lecture recording — with its slide deck if you have one, or let Streamline build the slides from the video — and get notes for every slide."
             action={
               <Button onClick={() => setDialogOpen(true)}>
                 <Plus />

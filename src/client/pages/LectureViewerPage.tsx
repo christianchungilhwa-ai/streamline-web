@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, FileText, LayoutList, Loader2, LocateFixed, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeft, Download, FileText, LayoutList, Loader2, LocateFixed, Sparkles } from "lucide-react";
 import {
   getLecture,
   getLectureStatus,
   startLecture,
   assetUrl,
+  downloadSlidesPdf,
   type LectureDetail,
   type StatusResponse,
 } from "@/lib/api";
@@ -30,6 +31,15 @@ import { SlideOutline, firstShownAt } from "@/components/SlideOutline";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
 
 type View = "slides" | "studyguide";
+
+/** The header's "download the slide deck" control. */
+interface DownloadAction {
+  label: string;
+  tooltip: string;
+  busy: boolean;
+  error: string | null;
+  onClick: () => void;
+}
 
 /** The slide card wrapper for slideNotes[i] inside the slide list. */
 function cardIn(list: HTMLElement | null, i: number): HTMLElement | null {
@@ -70,6 +80,8 @@ export function LectureViewerPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
+  const [deckDownloading, setDeckDownloading] = useState(false);
+  const [deckError, setDeckError] = useState<string | null>(null);
 
   const isLg = useMediaQuery("(min-width: 1024px)");
   usePageTitle(detail?.lecture.name ?? null);
@@ -144,10 +156,11 @@ export function LectureViewerPage() {
     const fromVideo = notes.length - fromPdf;
     const skipped = notes.filter((n) => !n.wasPresented).length;
     const dur = formatDuration(project.videoDuration);
+    const extracted = project.slideSource === "extract";
     return {
       subtitle: [dur !== "—" ? dur : null, plural(notes.length, "slide")].filter(Boolean).join(" · "),
       breakdown: [
-        fromPdf ? `${fromPdf} from your PDF` : null,
+        fromPdf ? `${fromPdf} ${extracted ? "from the deck built from the video" : "from your deck"}` : null,
         fromVideo ? `${fromVideo} captured from video` : null,
         skipped ? `${skipped} not shown` : null,
       ]
@@ -274,6 +287,7 @@ export function LectureViewerPage() {
           onRetry={retry}
           retrying={retrying}
           retryError={retryError}
+          errorKind={status?.errorKind}
         />
       </div>
     );
@@ -290,6 +304,29 @@ export function LectureViewerPage() {
     hasAnnotated,
   };
 
+  // The deck as a PDF: the upload, the converted PowerPoint, or the deck
+  // built from the recording. Credentialed blob fetch (the API is
+  // cross-origin, so <a download> alone wouldn't save it).
+  const extracted = project.slideSource === "extract";
+  const download: DownloadAction = {
+    label: extracted ? "Extracted deck" : "Slides PDF",
+    tooltip: extracted ? "Download the slide deck built from the recording (PDF)" : "Download the slide deck (PDF)",
+    busy: deckDownloading,
+    error: deckError,
+    onClick: async () => {
+      setDeckDownloading(true);
+      setDeckError(null);
+      try {
+        const base = (detail.lecture.name || "Lecture").replace(/[\\/:*?"<>|]+/g, "-").trim();
+        await downloadSlidesPdf(id, `${base}${extracted ? " (extracted slides)" : ""}.pdf`);
+      } catch (e: unknown) {
+        setDeckError(`Couldn't download the slides. ${friendlyError(e)}`);
+      } finally {
+        setDeckDownloading(false);
+      }
+    },
+  };
+
   return (
     <div ref={rootRef} className="flex h-full flex-col overflow-y-auto lg:overflow-hidden">
       <ViewerHeader
@@ -300,6 +337,7 @@ export function LectureViewerPage() {
         view={view}
         onViewChange={setView}
         mobileControls={<ViewerToggles {...toggleProps} iconOnly />}
+        download={download}
       />
 
       {showStudyguide && (
@@ -380,6 +418,7 @@ function ViewerHeader({
   view,
   onViewChange,
   mobileControls,
+  download,
 }: {
   ref?: Ref<HTMLDivElement>;
   title?: string;
@@ -390,6 +429,7 @@ function ViewerHeader({
   view?: View;
   onViewChange?: (v: View) => void;
   mobileControls?: ReactNode;
+  download?: DownloadAction;
 }) {
   const tabs = view && onViewChange ? { view, onViewChange } : null;
   return (
@@ -421,10 +461,22 @@ function ViewerHeader({
           </div>
         </div>
         <div>{tabs && <ViewSwitch {...tabs} />}</div>
-        <div className="flex items-center justify-self-end gap-1">
-          {/* SLOT — "Download slides (PDF)": a <Button variant="ghost" size="sm">
-              with <Download /> goes here; the download-slides session adds it.
-              Render it only when `tabs` is set (completed lectures). */}
+        <div className="flex min-w-0 items-center justify-self-end gap-2">
+          {tabs && download && (
+            <>
+              {download.error && (
+                <span role="alert" className="max-w-[16rem] truncate text-xs text-destructive-text" title={download.error}>
+                  {download.error}
+                </span>
+              )}
+              <Tip label={download.tooltip}>
+                <Button variant="ghost" size="sm" onClick={download.onClick} disabled={download.busy}>
+                  {download.busy ? <Loader2 className="animate-spin" /> : <Download />}
+                  {download.label}
+                </Button>
+              </Tip>
+            </>
+          )}
         </div>
       </div>
 
@@ -438,9 +490,20 @@ function ViewerHeader({
           <div className={cn("flex items-center gap-0.5", tabs.view !== "slides" && "invisible")}>
             {mobileControls}
           </div>
-          {/* SLOT — "Download slides (PDF)", icon-only: <Button variant="ghost"
-              size="icon-sm" aria-label="Download slides (PDF)"><Download /></Button>
-              goes here; the download-slides session adds it. */}
+          {download && (
+            <Tip label={download.error ?? download.tooltip}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={download.tooltip}
+                onClick={download.onClick}
+                disabled={download.busy}
+                className={cn(download.error && "text-destructive-text")}
+              >
+                {download.busy ? <Loader2 className="animate-spin" /> : <Download />}
+              </Button>
+            </Tip>
+          )}
         </div>
       )}
     </div>

@@ -195,13 +195,13 @@ export function SlideDetailView({
           </Badge>
         )}
         {note.isReordered && (
-          <Badge tone="warning" title="Presented in a different order than the PDF">
+          <Badge tone="warning" title="Presented in a different order than the deck">
             <ArrowDownUp />
             Out of order
           </Badge>
         )}
         {useVideoFrame && (
-          <Badge tone="neutral" title="Not in your PDF — captured from the recording">
+          <Badge tone="neutral" title="Not in your deck — captured from the recording">
             <Video />
             From video
           </Badge>

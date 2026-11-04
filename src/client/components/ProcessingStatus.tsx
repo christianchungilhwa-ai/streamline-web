@@ -24,6 +24,10 @@ export interface ProcessingStatusProps {
   retrying?: boolean;
   /** Already made friendly by the caller. */
   retryError?: string | null;
+  /** "slides": the deck (or the recording's slides) couldn't be used, so
+   *  retrying the same job would fail the same way — lead with a new
+   *  project instead. */
+  errorKind?: string | null;
 }
 
 /**
@@ -40,11 +44,13 @@ export function ProcessingStatus({
   onRetry,
   retrying,
   retryError,
+  errorKind,
 }: ProcessingStatusProps) {
   const pct = typeof progress === "number" && Number.isFinite(progress) ? Math.round(progress * 100) : null;
 
   if (status === "failed" || status === "canceled") {
     const failed = status === "failed";
+    const deckProblem = failed && errorKind === "slides";
     const stoppedAt = step && step !== "completed" ? stepLabel(step) : null;
     return (
       <StatusBody
@@ -63,20 +69,42 @@ export function ProcessingStatus({
             {error}
           </Callout>
         )}
-        <div className="mt-5 flex flex-wrap justify-center gap-2">
-          {onRetry && (
-            <Button onClick={onRetry} disabled={retrying}>
-              {retrying ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-              Try again
-            </Button>
-          )}
-          <Button asChild variant="ghost">
-            <Link to="/lectures?new=1">Start a new project</Link>
-          </Button>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Your uploaded files are kept, so nothing needs to re-upload.
-        </p>
+        {deckProblem ? (
+          <>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <Button asChild>
+                <Link to="/lectures?new=1">Start a new project</Link>
+              </Button>
+              {onRetry && (
+                <Button variant="ghost" onClick={onRetry} disabled={retrying}>
+                  {retrying ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                  Try again
+                </Button>
+              )}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Retrying will most likely fail the same way. Start a new project with the deck as a
+              PDF — or without a deck, to build the slides from the recording.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {onRetry && (
+                <Button onClick={onRetry} disabled={retrying}>
+                  {retrying ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                  Try again
+                </Button>
+              )}
+              <Button asChild variant="ghost">
+                <Link to="/lectures?new=1">Start a new project</Link>
+              </Button>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Your uploaded files are kept, so nothing needs to re-upload.
+            </p>
+          </>
+        )}
         {retryError && (
           <Callout tone="danger" className="mt-4 text-left">
             {retryError}

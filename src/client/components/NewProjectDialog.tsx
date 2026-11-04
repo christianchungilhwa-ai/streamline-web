@@ -17,25 +17,70 @@ import {
   ApiError,
   type CreateLectureResponse,
 } from "@/lib/api";
-import type { ROIRegion } from "@/lib/types";
+import type { ROIRegion, SlideSource } from "@/lib/types";
 import { RoiConfirm } from "@/components/RoiConfirm";
 import { cn } from "@/lib/utils";
-import { Loader2, FileText, Video } from "lucide-react";
+import { Loader2, FileText, Sparkles, Video, X } from "lucide-react";
 
 type Phase = "idle" | "creating" | "uploading" | "roi" | "starting" | "done" | "error";
 
 type FailedUpload = { kind: "video" | "pdf"; name: string; percent: number };
 
+// The deck goes to the job's "pdf" upload URL whatever its format; the
+// server tells PDF from PowerPoint by content and converts PowerPoint.
+const DECK_ACCEPT = [
+  ".pdf",
+  ".pptx",
+  ".ppt",
+  ".odp",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.oasis.opendocument.presentation",
+].join(",");
+
+/** Why `file` can't be the slide deck, or null when it can. Checks the
+ *  name, then the first KiB the way the server does (PDF header anywhere
+ *  in it, or a ZIP / legacy-Office container) — so a web page saved as
+ *  ".pdf" is caught before a multi-GB recording uploads. The file
+ *  picker's `accept` is only a hint ("All files" is one click away). */
+async function deckProblem(file: File): Promise<string | null> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "key") {
+    return "Keynote files can't be read — export the deck as a PDF or PowerPoint file first.";
+  }
+  if (!["pdf", "pptx", "ppt", "odp"].includes(ext)) {
+    return "Choose a PDF or PowerPoint (.pptx) file for the slide deck.";
+  }
+  let head: Uint8Array;
+  try {
+    head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+  } catch {
+    return "That file couldn't be read. Choose it again.";
+  }
+  const startsWith = (sig: number[]) => sig.every((b, i) => head[i] === b);
+  const hasPdfHeader = new TextDecoder("latin1").decode(head).includes("%PDF");
+  const isZip = startsWith([0x50, 0x4b, 0x03, 0x04]);
+  const isOle = startsWith([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  if (hasPdfHeader || isZip || isOle) return null;
+  return `“${file.name}” isn't really a PDF or PowerPoint file (it may be damaged, or a web page saved under that name).`;
+}
+
 /**
  * "New Project" sheet modal — opens over the LecturesPage.
  *
  *   1. POST /api/streamline/lectures → jobId + 2 upload URLs
- *   2. PUT both files DIRECTLY to streamline-server (parallel)
+ *   2. PUT the recording (and the deck, if one was chosen) DIRECTLY to
+ *      streamline-server (parallel)
  *   3. ROI step (parity with iOS): confirm/adjust the slide region across
  *      six frames of the just-uploaded video, pre-filled with the server's
  *      auto-detected suggestion.
- *   4. POST /api/streamline/lectures/:id/start (with the confirmed ROI)
+ *   4. POST /api/streamline/lectures/:id/start (with the confirmed ROI and
+ *      the slide source: "upload", or "extract" when no deck was chosen —
+ *      the server then builds the deck from the slides in the recording)
  *   5. Close + navigate to the viewer
+ *
+ * The deck is optional and may be a PDF or a PowerPoint file.
  *
  * The dialog is controlled (`open`/`onOpenChange`) so the caller can sync
  * with URL state (`?new=1`). Once the job is created+uploaded we lock the
@@ -55,22 +100,50 @@ export interface NewProjectDialogProps {
 export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) {
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [pdf, setPdf] = useState<File | null>(null);
+  const [deck, setDeck] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [pdfProgress, setPdfProgress] = useState(0);
+  const [deckProgress, setDeckProgress] = useState(0);
   const [videoProgress, setVideoProgress] = useState(0);
   const [created, setCreated] = useState<CreateLectureResponse | null>(null);
   const [suggestion, setSuggestion] = useState<ROIRegion | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [failedUpload, setFailedUpload] = useState<FailedUpload | null>(null);
+  // Why the last deck pick was refused — shown on the deck card, apart from
+  // upload/start errors so neither overwrites or outlives the other.
+  const [deckPickError, setDeckPickError] = useState<string | null>(null);
+  // The server refused the uploaded deck at start (content it can't use):
+  // the ROI step then offers to replace or drop the deck.
+  const [deckRejected, setDeckRejected] = useState<string | null>(null);
+  const [lastRoi, setLastRoi] = useState<ROIRegion | undefined>(undefined);
+  const replaceDeckInputRef = useRef<HTMLInputElement | null>(null);
 
   const busy = phase === "creating" || phase === "uploading" || phase === "starting";
   // Once the job exists on the server, only leave via explicit buttons.
   const locked = busy || phase === "roi";
   // "error" stays submittable — that's the in-place "Try again".
-  const submitDisabled = !pdf || !video || (phase !== "idle" && phase !== "error");
+  const submitDisabled = !video || (phase !== "idle" && phase !== "error");
+  // No deck chosen: the server extracts one from the recording.
+  const extractDeck = deck === null;
+
+  async function pickDeck(file: File | null) {
+    if (file) {
+      const problem = await deckProblem(file);
+      if (problem) {
+        setDeckPickError(problem);
+        return;
+      }
+    }
+    setDeckPickError(null);
+    setDeck(file);
+    setDeckProgress(0);
+    // A failure report about the previous deck no longer describes anything.
+    if (failedUpload?.kind === "pdf") {
+      setFailedUpload(null);
+      setError(null);
+    }
+  }
   const inRoi = phase === "roi" || phase === "starting";
   // Keep the bars frozen at their failure percents while showing the error.
   const showUploadProgress =
@@ -89,10 +162,10 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     uploadAbortRef.current = null;
   }
 
-  // PUT both files to the job's pre-shared URLs (parallel), recording
+  // PUT the files to the job's pre-shared URLs (parallel), recording
   // which file failed and how far it got so the error state can say so.
-  async function uploadBoth(c: CreateLectureResponse) {
-    if (!pdf || !video) return;
+  async function uploadFiles(c: CreateLectureResponse) {
+    if (!video) return;
     abortInflightUploads();
     const controller = new AbortController();
     uploadAbortRef.current = controller;
@@ -126,7 +199,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     };
     try {
       await Promise.all([
-        put("pdf", pdf, c.pdfUploadUrl, setPdfProgress),
+        deck ? put("pdf", deck, c.pdfUploadUrl, setDeckProgress) : Promise.resolve(),
         put("video", video, c.videoUploadUrl, setVideoProgress),
       ]);
     } finally {
@@ -136,7 +209,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!pdf || !video) return;
+    if (!video) return;
     setError(null);
     setFailedUpload(null);
     // After a failed upload, "Try again" reuses the already-created job —
@@ -152,7 +225,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
 
       setPhase("uploading");
       try {
-        await uploadBoth(c);
+        await uploadFiles(c);
       } catch (err) {
         // Only when the RETRY itself fails because the job/token is gone
         // server-side do we fall back to a fresh job and upload there
@@ -160,13 +233,13 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
         // gate rejects before any 404 could), a deleted job as 404.
         if (!(priorJob && err instanceof ApiError && [401, 403, 404].includes(err.status))) throw err;
         setFailedUpload(null);
-        setPdfProgress(0);
+        setDeckProgress(0);
         setVideoProgress(0);
         setPhase("creating");
         c = await createLecture(name.trim() || "Untitled Lecture");
         setCreated(c);
         setPhase("uploading");
-        await uploadBoth(c);
+        await uploadFiles(c);
       }
 
       // Parity with iOS: confirm the slide region before processing. Kick
@@ -194,20 +267,77 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
   }
 
   // Confirm the ROI (or `undefined` → server auto-detects) and start.
-  async function finishStart(roi?: ROIRegion) {
+  // `source` is explicit because callers may have just changed `deck` in
+  // this same event (state updates land on the next render).
+  async function finishStart(roi?: ROIRegion, source: SlideSource = extractDeck ? "extract" : "upload") {
     if (!created) return;
     setError(null);
+    setDeckRejected(null);
+    setLastRoi(roi);
     try {
       setPhase("starting");
-      await startLecture(created.id, roi);
+      // A deck left over from an earlier, failed attempt on this same job
+      // is ignored in extract mode — the server builds its own.
+      await startLecture(created.id, roi, source);
       setPhase("done");
       onOpenChange(false);
       navigate(`/lectures/${created.id}`);
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.message : String(e);
-      setError(msg);
+      // 400/409 on an upload-mode start = the server can't use this deck
+      // (its content isn't a deck it reads). Retrying can't help; offer to
+      // replace or drop the deck without re-uploading the recording.
+      if (source === "upload" && e instanceof ApiError && (e.status === 400 || e.status === 409)) {
+        setDeckRejected(msg);
+      } else {
+        setError(msg);
+      }
       setPhase("roi"); // stay on the ROI screen so they can retry
     }
+  }
+
+  // From the ROI step after the server refused the deck: upload only the
+  // new deck to this job (the recording is already on the server), then
+  // start again with the region the user confirmed.
+  async function replaceDeck(file: File) {
+    if (!created) return;
+    const problem = await deckProblem(file);
+    if (problem) {
+      setDeckRejected(problem);
+      return;
+    }
+    abortInflightUploads();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    setDeck(file);
+    setDeckRejected(null);
+    setDeckProgress(0);
+    setPhase("starting");
+    try {
+      await uploadFile(
+        created.pdfUploadUrl,
+        file,
+        (loaded, total) => {
+          if (!controller.signal.aborted) setDeckProgress(total ? loaded / total : 0);
+        },
+        controller.signal,
+      );
+    } catch (e: unknown) {
+      if (isUploadAborted(e)) return; // dialog cancelled
+      setDeckRejected(
+        `Uploading “${file.name}” failed: ${e instanceof ApiError ? e.message : String(e)}`,
+      );
+      setPhase("roi");
+      return;
+    } finally {
+      if (uploadAbortRef.current === controller) uploadAbortRef.current = null;
+    }
+    await finishStart(lastRoi, "upload");
+  }
+
+  function dropDeckAndExtract() {
+    setDeck(null);
+    void finishStart(lastRoi, "extract");
   }
 
   // Back out during the ROI step: best-effort delete the un-started job so
@@ -220,7 +350,8 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     setSuggestion(null);
     setError(null);
     setFailedUpload(null);
-    setPdfProgress(0);
+    setDeckRejected(null);
+    setDeckProgress(0);
     setVideoProgress(0);
     onOpenChange(false);
     if (id) {
@@ -245,15 +376,59 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
         </DialogHeader>
 
         {inRoi && video ? (
-          <RoiConfirm
-            videoFile={video}
-            suggestion={suggestion}
-            detecting={detecting}
-            busy={phase === "starting"}
-            error={error}
-            onConfirm={(roi) => finishStart(roi)}
-            onCancel={cancelFromRoi}
-          />
+          <>
+            {extractDeck && (
+              <p className="text-xs text-muted-foreground">
+                The slide deck will be built from this region of the recording — frame
+                it tightly around the slides.
+              </p>
+            )}
+            {deckRejected && (
+              <div className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                <p className="text-destructive">{deckRejected}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => replaceDeckInputRef.current?.click()}
+                  >
+                    <FileText />
+                    Choose another deck…
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={dropDeckAndExtract}>
+                    <Sparkles />
+                    Remove deck — extract slides from the recording
+                  </Button>
+                </div>
+                <input
+                  ref={replaceDeckInputRef}
+                  type="file"
+                  accept={DECK_ACCEPT}
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) void replaceDeck(f);
+                  }}
+                />
+              </div>
+            )}
+            {phase === "starting" && deck && deckProgress > 0 && deckProgress < 1 && (
+              <p className="text-xs text-muted-foreground">
+                Uploading {deck.name}… {Math.round(deckProgress * 100)}%
+              </p>
+            )}
+            <RoiConfirm
+              videoFile={video}
+              suggestion={suggestion}
+              detecting={detecting}
+              busy={phase === "starting"}
+              error={error}
+              onConfirm={(roi) => finishStart(roi)}
+              onCancel={cancelFromRoi}
+            />
+          </>
         ) : (
           <form onSubmit={onSubmit} className="mt-4 space-y-5">
             <input
@@ -285,15 +460,34 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
               />
               <FileSelectCard
                 accent="red"
-                title="Slide Deck (PDF)"
+                title="Slide Deck"
+                hint="Optional · PDF or PowerPoint"
                 icon={<FileText className="h-11 w-11" strokeWidth={2.2} />}
-                accept="application/pdf"
-                file={pdf}
-                onPick={setPdf}
-                progress={showUploadProgress ? pdfProgress : null}
+                accept={DECK_ACCEPT}
+                file={deck}
+                onPick={(f) => void pickDeck(f)}
+                onClear={() => void pickDeck(null)}
+                problem={deckPickError}
+                progress={showUploadProgress && deck ? deckProgress : null}
                 disabled={busy}
               />
             </div>
+
+            {extractDeck && (
+              <div className="flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/[0.06] p-3">
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">
+                    Extract &amp; Create Slide deck from the Video Recording
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    No deck? Streamline builds one from the slides shown in the recording
+                    (desktop, websites and other apps are left out). Download it as a PDF once
+                    processing finishes.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -354,19 +548,28 @@ function phaseLabel(p: Phase): string {
 function FileSelectCard({
   accent,
   title,
+  hint = "Tap to select",
   icon,
   accept,
   file,
   onPick,
+  onClear,
+  problem,
   progress,
   disabled,
 }: {
   accent: "sky" | "red";
   title: string;
+  /** Shown while no file is picked. */
+  hint?: string;
   icon: React.ReactNode;
   accept: string;
   file: File | null;
   onPick: (f: File | null) => void;
+  /** When given, a picked file gets a remove button (optional inputs). */
+  onClear?: () => void;
+  /** Why the last pick was refused, shown on the card. */
+  problem?: string | null;
   progress: number | null;
   disabled: boolean;
 }) {
@@ -380,6 +583,10 @@ function FileSelectCard({
     accent === "sky" ? "bg-primary" : "bg-red-500";
 
   return (
+    // The remove button sits OUTSIDE the <label>: inside it, a <button> would
+    // become the label's labeled control and every click on the card would
+    // "remove" instead of opening the file picker.
+    <div className="relative">
     <label
       className={cn(
         "group relative flex min-h-[200px] cursor-pointer flex-col items-center justify-center",
@@ -397,8 +604,9 @@ function FileSelectCard({
           <span> · {(file.size / (1024 * 1024)).toFixed(1)} MB</span>
         </span>
       ) : (
-        <span className="text-xs text-muted-foreground">Tap to select</span>
+        <span className="text-xs text-muted-foreground">{hint}</span>
       )}
+      {problem && <span className="text-xs text-destructive">{problem}</span>}
 
       {progress !== null && (
         <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-black/10 dark:bg-white/10">
@@ -413,9 +621,25 @@ function FileSelectCard({
         type="file"
         accept={accept}
         className="hidden"
-        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+        onChange={(e) => {
+          onPick(e.target.files?.[0] ?? null);
+          // Reset so picking the same file again (after removing it, or
+          // after a rejected pick) still fires onChange.
+          e.target.value = "";
+        }}
         disabled={disabled}
       />
     </label>
+      {file && onClear && !disabled && (
+        <button
+          type="button"
+          aria-label={`Remove ${file.name}`}
+          className="absolute right-2 top-2 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground dark:hover:bg-white/10"
+          onClick={onClear}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
   );
 }
