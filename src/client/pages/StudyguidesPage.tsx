@@ -1,103 +1,122 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listStudyguides, type StudyguideListItem } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
+import { formatDate, formatDateFull, plural } from "@/lib/format";
+import { usePageTitle } from "@/lib/usePageTitle";
+import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { ProjectCard } from "@/components/ProjectCard";
 import { Loader2, NotebookText, FileText } from "lucide-react";
 
-/** "My Studyguides" — lists the user's lectures that have a generated
- *  studyguide (server-derived; no separate store). Mirrors My Library's
- *  layout: max-w-6xl container + card grid, each card opening the
- *  lecture viewer's studyguide tab. */
+const TITLE = "My study guides";
+
+/** "My study guides" — the user's projects that have a generated study
+ *  guide (server-derived; no separate store). Same shell and card grid as
+ *  My Library; each card opens the viewer's Study guide tab. */
 export function StudyguidesPage() {
+  usePageTitle(TITLE);
   const [items, setItems] = useState<StudyguideListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadNonce, setLoadNonce] = useState(0);
 
   useEffect(() => {
     let alive = true;
     listStudyguides()
-      .then((r) => alive && setItems(r.studyguides))
-      .catch((e) => alive && setError(String(e?.message ?? e)));
+      .then((r) => {
+        if (!alive) return;
+        setItems(r.studyguides);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(friendlyError(e));
+      });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [loadNonce]);
 
   return (
-    <div className="mx-auto max-w-6xl p-6 md:p-10">
-      <header className="mb-8">
-        <h1 className="page-title">My Studyguides</h1>
-      </header>
+    <PageContainer>
+      <PageHeader title={TITLE} description="Study guides generated from your projects" />
 
-      {error && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+      {error && items === null && (
+        <Callout
+          tone="danger"
+          action={
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => {
+                setError(null);
+                setLoadNonce((n) => n + 1);
+              }}
+            >
+              Try again
+            </Button>
+          }
+        >
           {error}
-        </div>
+        </Callout>
       )}
 
       {items === null && !error && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading studyguides…
+          <Loader2 className="size-4 animate-spin" />
+          Loading study guides…
         </div>
       )}
 
       {items && items.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
-          <NotebookText className="mx-auto h-10 w-10 text-muted-foreground" />
-          <h2 className="mt-4 text-lg font-medium">No studyguides yet</h2>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Open a lecture from My Library and switch to the{" "}
-            <span className="font-medium text-foreground">Studyguide</span> tab
-            to generate one. It'll show up here.
-          </p>
-          <Link
-            to="/lectures"
-            className="mt-4 inline-block text-sm font-medium text-primary hover:underline"
-          >
-            Go to My Library →
-          </Link>
-        </div>
+        <EmptyState
+          icon={<NotebookText />}
+          title="No study guides yet"
+          description="Open a project and switch to the Study guide tab to generate one."
+          action={
+            <Button asChild variant="outline">
+              <Link to="/lectures">Go to My Library</Link>
+            </Button>
+          }
+        />
       )}
 
       {items && items.length > 0 && (
-        <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] sm:gap-4 lg:gap-5">
           {items.map((sg) => (
             <li key={sg.id}>
-              <StudyguideCard item={sg} />
+              <ProjectCard
+                to={`/lectures/${sg.id}?tab=studyguide`}
+                lectureId={sg.id}
+                thumbnailKey={sg.thumbnailKey}
+                fallbackIcon={<FileText />}
+                title={sg.name}
+                meta={<StudyguideMeta item={sg} />}
+              />
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </PageContainer>
   );
 }
 
-/** Mirrors LecturesPage's LectureCard: gradient media region (doc icon)
- *  + body with title and meta. Opens the viewer's studyguide tab. */
-function StudyguideCard({ item }: { item: StudyguideListItem }) {
-  const meta: string[] = [];
-  if (item.sectionCount != null) {
-    meta.push(`${item.sectionCount} section${item.sectionCount === 1 ? "" : "s"}`);
-  }
-  if (item.generatedAt != null) {
-    meta.push(new Date(item.generatedAt * 1000).toLocaleDateString());
-  }
-
+/** "12 sections · Oct 15" — either half is dropped when the server
+ *  doesn't know it. */
+function StudyguideMeta({ item }: { item: StudyguideListItem }) {
+  const generated = item.generatedAt != null ? new Date(item.generatedAt * 1000) : null;
+  const sections = item.sectionCount != null ? plural(item.sectionCount, "section") : null;
+  if (!sections && !generated) return null;
   return (
-    <Link
-      to={`/lectures/${item.id}?tab=studyguide`}
-      className="group flex h-[240px] flex-col overflow-hidden rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
-    >
-      <div className="relative flex h-[120px] items-center justify-center bg-gradient-to-br from-primary/15 to-primary/5">
-        <FileText className="h-9 w-9 text-primary/80 transition-transform group-hover:scale-110" />
-      </div>
-      <div className="flex flex-1 flex-col px-3 py-3">
-        <div className="line-clamp-2 text-sm font-semibold text-foreground">
-          {item.name}
-        </div>
-        <div className="mt-auto pt-2 text-xs text-muted-foreground">
-          {meta.join(" · ")}
-        </div>
-      </div>
-    </Link>
+    <>
+      {sections}
+      {sections && generated && " · "}
+      {generated && (
+        <time dateTime={generated.toISOString()} title={formatDateFull(generated)}>
+          {formatDate(generated)}
+        </time>
+      )}
+    </>
   );
 }

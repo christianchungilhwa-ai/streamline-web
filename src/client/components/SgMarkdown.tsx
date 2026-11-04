@@ -88,6 +88,15 @@ export function SgMarkdown({
     img({ node, ...props }) {
       return <img loading="lazy" {...props} />;
     },
+    // Wide tables scroll inside their own box instead of pushing the
+    // reader sideways on phones (styles: .prose-table-wrap in index.css).
+    table({ node, children, ...props }) {
+      return (
+        <div className="prose-table-wrap">
+          <table {...props}>{children}</table>
+        </div>
+      );
+    },
   };
 
   return (

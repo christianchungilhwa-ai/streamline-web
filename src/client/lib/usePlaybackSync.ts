@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LectureProject, TranscriptWord } from "./types";
 
 /**
@@ -37,7 +37,9 @@ export interface PlaybackSyncResult {
 const TICK_MS = 100;
 
 export function usePlaybackSync(
-  videoRef: RefObject<HTMLVideoElement | null>,
+  /** The <video> element itself (held in state by the caller, so the
+   *  loop restarts when the element mounts, remounts or goes away). */
+  video: HTMLVideoElement | null,
   project: LectureProject | null,
 ): PlaybackSyncResult {
   const [result, setResult] = useState<PlaybackSyncResult>({
@@ -62,7 +64,6 @@ export function usePlaybackSync(
   }, [project]);
 
   useEffect(() => {
-    const video = videoRef.current;
     if (!video || !project) return;
 
     let raf = 0;
@@ -163,17 +164,28 @@ export function usePlaybackSync(
     raf = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(raf);
-  }, [project, videoRef]);
+  }, [project, video]);
 
   return result;
 }
 
-/** Seek the video to `t`, accounting for paused/playing state. */
-export function seekVideoTo(video: HTMLVideoElement | null, t: number) {
+/**
+ * Seek the video to `t` and (by default) start playing from there — a
+ * click on a time chip, slide image or outline row means "play from
+ * here". `play: false` only moves the playhead.
+ */
+export function seekVideoTo(
+  video: HTMLVideoElement | null,
+  t: number,
+  { play = true }: { play?: boolean } = {},
+) {
   if (!video) return;
   try {
     video.currentTime = Math.max(0, t);
   } catch {
     // ignore — some readyStates throw on seek
   }
+  // play() rejects when autoplay is blocked or the source is gone; the
+  // seek itself already happened, so there is nothing to report.
+  if (play) void video.play().catch(() => {});
 }

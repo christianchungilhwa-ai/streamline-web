@@ -1,93 +1,160 @@
-import { useMemo, useRef, useEffect } from "react";
-import type { SlideNote, TranscriptWord } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { Fragment, useEffect, useMemo, useRef } from "react";
+import type { SlideNote, TranscriptVisit, TranscriptWord } from "@/lib/types";
+import { cn, getScrollParent, scrollWithin } from "@/lib/utils";
+import { alignDisplayTokens, hasSpeech, sentenceSpans, splitParagraphs, type SentenceSpan } from "@/lib/transcriptTokens";
 
 export interface TranscriptPanelProps {
   note: SlideNote;
   activeWord: TranscriptWord | null;
+  /** Keep the spoken word in view inside its scroller (Follow video on and
+   *  this slide active). Off → never scrolls. */
+  follow: boolean;
   /** Called when the user clicks a word (to seek the video). */
   onSeekTo?: (timeSeconds: number) => void;
   className?: string;
 }
 
-/**
- * Renders one slide's transcript as visit-paragraphs. When word-level
- * timings are present, each word is a click target that seeks the
- * video. The currently-spoken word is highlighted.
- *
- * Auto-scrolls the active word into view (smooth, nearest-block) so
- * during playback the panel tracks the speaker without the user
- * needing to scroll manually.
- */
-export function TranscriptPanel({ note, activeWord, onSeekTo, className }: TranscriptPanelProps) {
-  const wordRefs = useRef<Map<TranscriptWord, HTMLSpanElement | null>>(new Map());
+/** One rendered token: words `first..last` (inclusive) under one span. */
+interface Token {
+  first: number;
+  last: number;
+  text: string;
+}
 
-  // Auto-scroll the active word into view when it changes.
-  useEffect(() => {
-    if (!activeWord) return;
-    const el = wordRefs.current.get(activeWord);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+type VisitModel =
+  | { kind: "words"; visit: TranscriptVisit; words: TranscriptWord[]; paragraphs: Token[][] }
+  | { kind: "sentences"; visit: TranscriptVisit; sentences: SentenceSpan[] };
+
+/** Visit → paragraphs of clickable tokens (punctuation restored from the
+ *  visit text), or sentence spans when the words and text don't align. */
+function buildVisit(visit: TranscriptVisit): VisitModel {
+  const words = visit.words ?? [];
+  const aligned = words.length ? alignDisplayTokens(visit.text, words) : null;
+  if (!aligned) return { kind: "sentences", visit, sentences: sentenceSpans(visit) };
+  const { display, owner } = aligned;
+  const paragraphs = splitParagraphs(words, display).map((indices) => {
+    const tokens: Token[] = [];
+    for (const j of indices) {
+      const last = tokens[tokens.length - 1];
+      if (last && owner[j] === last.first) last.last = j;
+      else if (display[j]) tokens.push({ first: j, last: j, text: display[j] });
+      else if (last) last.last = j; // empty bare word: fold into the previous span
     }
-  }, [activeWord]);
+    return tokens;
+  });
+  return { kind: "words", visit, words, paragraphs };
+}
 
-  const visits = useMemo(() => {
-    // Drop visits with zero content — they're synthetic and would
-    // render as empty paragraphs.
-    return note.transcriptVisits.filter((v) => (v.text ?? "").trim() || (v.words?.length ?? 0) > 0);
-  }, [note.transcriptVisits]);
+const wordClass = "cursor-pointer rounded-[3px] transition-colors duration-150 [box-decoration-break:clone]";
+const activeClass =
+  "bg-primary/20 text-foreground shadow-[0_0_0_2px_color-mix(in_oklab,var(--color-primary)_20%,transparent)]";
+const idleClass = "hover:bg-primary/10";
+
+/**
+ * One slide's transcript. Each visit is split into paragraphs (pauses and
+ * sentence ends); with word timings every word is a click target that
+ * seeks the video and the spoken word is highlighted. Punctuation comes
+ * from the visit text, aligned onto the timed words.
+ *
+ * With `follow`, the spoken word is kept in view inside the nearest
+ * scrolling ancestor only (never `scrollIntoView`, which would also move
+ * the page and every other scroller).
+ */
+export function TranscriptPanel({ note, activeWord, follow, onSeekTo, className }: TranscriptPanelProps) {
+  const activeRef = useRef<HTMLSpanElement | null>(null);
+
+  const visits = useMemo(
+    () =>
+      (note.transcriptVisits ?? [])
+        // Drop visits with nothing to read (synthetic, or "…" only).
+        .filter((v) => hasSpeech(v.text) || (v.words ?? []).some((w) => hasSpeech(String(w.text ?? ""))))
+        .map(buildVisit),
+    [note.transcriptVisits],
+  );
+
+  useEffect(() => {
+    if (!activeWord || !follow) return;
+    const el = activeRef.current;
+    if (el) keepInView(el);
+  }, [activeWord, follow]);
 
   if (visits.length === 0) {
     return (
       <div className={cn("text-sm text-muted-foreground", className)}>
-        {note.transcriptText.trim() ? (
-          <p>{note.transcriptText}</p>
-        ) : (
-          <p className="italic">No transcript for this slide.</p>
-        )}
+        {hasSpeech(note.transcriptText) ? <p>{note.transcriptText}</p> : <p>No transcript for this slide.</p>}
       </div>
     );
   }
 
   return (
-    <div className={cn("space-y-3 text-sm leading-relaxed", className)}>
-      {visits.map((visit, i) => (
-        <p key={i} className="text-foreground">
-          {visit.words?.length ? (
-            visit.words.map((w, j) => {
-              const isActive = w === activeWord;
-              return (
-                <span
-                  key={j}
-                  ref={(el) => {
-                    wordRefs.current.set(w, el);
-                  }}
-                  onClick={() => onSeekTo?.(w.start)}
-                  className={cn(
-                    "cursor-pointer rounded px-0.5 transition-colors",
-                    // Active word — sky-blue tint, not full saturation,
-                    // so the reading flow isn't broken by a loud
-                    // highlight on every spoken word.
-                    isActive
-                      ? "bg-primary/25 text-primary font-medium"
-                      : "hover:bg-accent hover:text-accent-foreground",
-                  )}
-                >
-                  {w.text}
-                  {j < (visit.words?.length ?? 0) - 1 ? " " : ""}
-                </span>
-              );
-            })
-          ) : (
-            <span
-              onClick={() => onSeekTo?.(visit.startTime)}
-              className="cursor-pointer rounded hover:bg-accent"
-            >
-              {visit.text}
-            </span>
-          )}
-        </p>
-      ))}
+    <div className={cn("max-w-[70ch] space-y-4 text-[15px] leading-7 text-foreground/90", className)}>
+      {visits.map((m, i) => {
+        if (m.kind === "sentences") {
+          const words = m.visit.words ?? [];
+          const activeAt = activeWord && words.includes(activeWord) ? activeWord.start : null;
+          return (
+            <p key={i}>
+              {m.sentences.map((s, k) => {
+                const isActive =
+                  activeAt !== null && activeAt >= s.start && (activeAt < s.end || k === m.sentences.length - 1);
+                return (
+                  <Fragment key={k}>
+                    <span
+                      ref={isActive ? activeRef : undefined}
+                      onClick={() => onSeekTo?.(s.start)}
+                      className={cn(wordClass, isActive ? activeClass : idleClass)}
+                    >
+                      {s.text}
+                    </span>
+                    {k < m.sentences.length - 1 ? " " : null}
+                  </Fragment>
+                );
+              })}
+            </p>
+          );
+        }
+        const activeIdx = activeWord ? m.words.indexOf(activeWord) : -1;
+        return (
+          <Fragment key={i}>
+            {m.paragraphs.map((tokens, p) => (
+              <p key={p}>
+                {tokens.map((t, k) => {
+                  const isActive = activeIdx >= t.first && activeIdx <= t.last;
+                  return (
+                    <Fragment key={t.first}>
+                      <span
+                        ref={isActive ? activeRef : undefined}
+                        onClick={() => onSeekTo?.(m.words[t.first].start)}
+                        className={cn(wordClass, isActive ? activeClass : idleClass)}
+                      >
+                        {t.text}
+                      </span>
+                      {k < tokens.length - 1 ? " " : null}
+                    </Fragment>
+                  );
+                })}
+              </p>
+            ))}
+          </Fragment>
+        );
+      })}
     </div>
   );
+}
+
+/** Follow the spoken word: nothing while it's comfortably visible; once
+ *  it leaves the view, bring it back to about a third of the way down
+ *  (below any sticky header) so the next lines are readable ahead of the
+ *  speaker, instead of creeping along the bottom edge. */
+function keepInView(el: HTMLElement) {
+  const sc = getScrollParent(el);
+  if (!sc) return;
+  const inset = Number(sc.dataset.stickyOffset ?? 0);
+  const pad = 24;
+  const c = sc.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const top = r.top - c.top;
+  const bottom = r.bottom - c.top;
+  if (top >= inset + pad && bottom <= sc.clientHeight - pad) return;
+  scrollWithin(sc, el, "start", Math.max(pad, Math.round((sc.clientHeight - inset) / 3)));
 }

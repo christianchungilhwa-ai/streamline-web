@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import type { ROIRegion } from "@/lib/types";
 
 /** Matches streamline-server's ROIRegion.full_frame() default. */
@@ -103,10 +104,10 @@ export interface RoiConfirmProps {
 
 /**
  * Mirrors the iOS "Detect Slide Region" flow (ROIDetectionView):
- * six frames sampled across the timeline, a draggable orange ROI box with a
- * dimmed surround on the selected frame, a "verify across the timeline"
+ * six frames sampled across the timeline, a draggable ROI box (primary) with
+ * a dimmed surround on the selected frame, a "verify across the timeline"
  * thumbnail strip (tap to swap the canvas; each thumb previews the ROI in
- * green), and Adjust Manually / Reset / Use This Region controls.
+ * the success color), and Adjust manually / Reset / Use this region controls.
  *
  * Frames are extracted client-side from the just-uploaded video; the ROI is
  * pre-filled with the server's auto-detected suggestion (the web analogue of
@@ -233,10 +234,10 @@ export function RoiConfirm({
   const showSpinner = extracting && frames.length === 0;
 
   return (
-    <div className="mt-1 max-h-[78vh] space-y-3 overflow-y-auto">
-      <div className="text-center">
-        <h3 className="text-base font-semibold text-foreground">Detect Slide Region</h3>
-        <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+    <div className="space-y-4">
+      <div>
+        <h3 className="section-title text-foreground">Detect slide region</h3>
+        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
           We detected the slide area in your video. Adjust if needed, and tap a
           thumbnail below to verify it holds up at different points in the
           recording.
@@ -250,7 +251,7 @@ export function RoiConfirm({
         </div>
       ) : selectedFrame ? (
         <>
-          {/* Main editing canvas: selected frame + orange ROI box. */}
+          {/* Main editing canvas: selected frame + ROI box. */}
           <div className="flex justify-center">
             <div
               ref={canvasRef}
@@ -267,7 +268,7 @@ export function RoiConfirm({
               />
               {/* Box dims everything outside via a huge spread box-shadow. */}
               <div
-                className="pointer-events-none absolute border-2 border-orange-500"
+                className="pointer-events-none absolute border-2 border-primary"
                 style={{ ...boxStyle, boxShadow: "0 0 0 9999px rgba(0,0,0,0.4)" }}
               >
                 {adjusting &&
@@ -276,7 +277,7 @@ export function RoiConfirm({
                       key={c}
                       onPointerDown={(e) => beginDrag(e, c)}
                       className={cn(
-                        "pointer-events-auto absolute h-5 w-5 rounded-full border-2 border-orange-500 bg-background",
+                        "pointer-events-auto absolute h-5 w-5 rounded-full border-2 border-primary bg-background shadow-sm",
                         c === "tl" && "-left-2.5 -top-2.5 cursor-nwse-resize",
                         c === "tr" && "-right-2.5 -top-2.5 cursor-nesw-resize",
                         c === "bl" && "-left-2.5 -bottom-2.5 cursor-nesw-resize",
@@ -297,7 +298,7 @@ export function RoiConfirm({
           {/* "Verify across the timeline" thumbnail strip. */}
           {frames.length > 1 && (
             <div>
-              <p className="px-1 pb-1 text-xs text-muted-foreground">
+              <p className="meta pb-1.5">
                 Verify across the timeline
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1">
@@ -306,6 +307,7 @@ export function RoiConfirm({
                     key={i}
                     type="button"
                     onClick={() => setSelectedIdx(i)}
+                    aria-pressed={i === selectedIdx}
                     className={cn(
                       "relative shrink-0 overflow-hidden rounded-md border-2 transition-colors",
                       i === selectedIdx ? "border-primary" : "border-border hover:border-muted-foreground",
@@ -315,7 +317,7 @@ export function RoiConfirm({
                   >
                     <img src={f.src} alt="" className="block h-full w-full object-cover" draggable={false} />
                     <span
-                      className="pointer-events-none absolute border border-green-500"
+                      className="pointer-events-none absolute border border-success"
                       style={boxStyle}
                     />
                     <span className="pointer-events-none absolute bottom-0.5 right-1 rounded bg-black/65 px-1 text-[10px] tabular-nums text-white">
@@ -335,9 +337,9 @@ export function RoiConfirm({
       )}
 
       {error && (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        <Callout tone="danger" icon={<AlertCircle />}>
           {error}
-        </div>
+        </Callout>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -346,7 +348,6 @@ export function RoiConfirm({
           variant="ghost"
           onClick={onCancel}
           disabled={busy}
-          className="text-primary hover:text-primary"
         >
           Cancel
         </Button>
@@ -371,11 +372,11 @@ export function RoiConfirm({
             onClick={() => setAdjusting((a) => !a)}
             disabled={busy || !selectedFrame}
           >
-            {adjusting ? "Done Adjusting" : "Adjust Manually"}
+            {adjusting ? "Done adjusting" : "Adjust manually"}
           </Button>
           <Button type="button" onClick={() => onConfirm(roi)} disabled={busy}>
             {busy && <Loader2 className="animate-spin" />}
-            Use This Region
+            Use this region
           </Button>
         </div>
       </div>

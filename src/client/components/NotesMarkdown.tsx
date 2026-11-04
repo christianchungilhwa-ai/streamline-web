@@ -38,6 +38,16 @@ const components: Components = {
       </a>
     );
   },
+  // Wide tables scroll inside their own box instead of pushing the card
+  // sideways on phones (styles: .prose-table-wrap in index.css). Raw-HTML
+  // attributes are dropped, same as span/mark above.
+  table({ children }) {
+    return (
+      <div className="prose-table-wrap">
+        <table>{children}</table>
+      </div>
+    );
+  },
 };
 
 export function NotesMarkdown({ markdown }: { markdown: string }) {

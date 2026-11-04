@@ -129,7 +129,7 @@ export function SgPairTabs({
             {i === 0 ? (
               <FileText className="h-3.5 w-3.5 text-primary" aria-hidden />
             ) : (
-              <Sparkles className="h-3.5 w-3.5 text-purple-400" aria-hidden />
+              <Sparkles className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
             )}
             {tab.label}
           </button>

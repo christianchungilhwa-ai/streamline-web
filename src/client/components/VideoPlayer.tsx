@@ -1,7 +1,9 @@
-import { type RefObject } from "react";
+import { type Ref } from "react";
 
 export interface VideoPlayerProps {
-  videoRef: RefObject<HTMLVideoElement | null>;
+  /** A ref object or a callback ref (the viewer passes a state setter so
+   *  playback sync restarts whenever the element mounts). */
+  videoRef: Ref<HTMLVideoElement>;
   src: string;
   className?: string;
 }
@@ -24,7 +26,7 @@ export function VideoPlayer({ videoRef, src, className }: VideoPlayerProps) {
       playsInline
       preload="metadata"
       crossOrigin="use-credentials"
-      className={className ?? "w-full rounded-lg bg-black"}
+      className={className ?? "aspect-video w-full rounded-lg bg-black"}
     />
   );
 }

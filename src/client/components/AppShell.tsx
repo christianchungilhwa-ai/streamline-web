@@ -1,42 +1,98 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Outlet, useLocation, Link } from "react-router-dom";
+import {
+  AlertCircle,
+  ArrowUpRight,
+  ChevronsUpDown,
+  ExternalLink,
+  Menu,
+  Moon,
+  NotebookText,
+  PanelLeft,
+  Sun,
+  Users,
+  X,
+} from "lucide-react";
 import { getSessionUser, type SessionUser } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/lib/useTheme";
-import { NotebookText, Users, Sun, Moon, PanelLeft, Menu, X } from "lucide-react";
+import { useTheme, type Theme } from "@/lib/useTheme";
+import { useMediaQuery } from "@/lib/useMediaQuery";
+import { PageTitleContext } from "@/lib/usePageTitle";
 import { CommunityIcon, LibraryIcon } from "@/lib/icons";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Tip, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+/** sessionStorage key for the user's explicit collapse choice. */
+const COLLAPSE_KEY = "streamline-sidebar-collapsed";
+
+function readCollapsedPref(): boolean | null {
+  try {
+    const v = window.sessionStorage.getItem(COLLAPSE_KEY);
+    return v === "1" ? true : v === "0" ? false : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Auth-gated layout. On mount, hits Claraity-web's /api/auth/user via the
  *  shared session cookie. Anonymous → redirect to claraity.app/login.
  *
- *  The sidebar is a 1:1 translation of Claraity-web's `.sidebar` CSS box
- *  model. On desktop it's a static, collapsible rail (220px → 56px). On
- *  mobile (<768px) it mirrors Claraity-web's mobile pattern: a 48px top bar
- *  with a hamburger + section title + logo, and the sidebar becomes a
- *  slide-in drawer over a dimmed backdrop.
+ *  Desktop (≥768px): a static sidebar rail, expanded (220px) or collapsed
+ *  (56px). Below 1280px it starts collapsed; an explicit collapse/expand
+ *  choice wins for the rest of the session.
+ *
+ *  Mobile (<768px): a 48px top bar (menu button + page title + logo) and the
+ *  sidebar becomes a slide-in drawer over a dimmed backdrop, always expanded.
+ *
+ *  Pages report their title through PageTitleContext (usePageTitle) so the
+ *  mobile top bar can show e.g. the lecture name on the viewer.
  */
 export function AppShell() {
   const location = useLocation();
-  const [user, setUser] = useState<SessionUser | null | "loading">("loading");
-  const { theme, toggle: toggleTheme } = useTheme();
-  const [collapsed, setCollapsed] = useState(false);
+  const [user, setUser] = useState<SessionUser | null | "loading" | "error">("loading");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+  const [pageTitle, setPageTitle] = useState<string | null>(null);
+  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isNarrow = useMediaQuery("(max-width: 1279px)");
+  const [collapsedPref, setCollapsedPrefState] = useState<boolean | null>(readCollapsedPref);
 
-  // Track the mobile breakpoint so the drawer always renders expanded on
-  // phones (the desktop "collapsed" rail doesn't apply there).
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const update = () => setIsMobile(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+  const setCollapsedPref = useCallback((v: boolean) => {
+    setCollapsedPrefState(v);
+    try {
+      window.sessionStorage.setItem(COLLAPSE_KEY, v ? "1" : "0");
+    } catch {
+      // Storage can be blocked; the in-memory choice still holds.
+    }
   }, []);
 
   // Close the mobile drawer whenever the route changes (i.e. on nav tap).
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname, location.search]);
+
+  // Escape closes the open drawer.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -45,12 +101,17 @@ export function AppShell() {
         if (!alive) return;
         if (!u) {
           const here = encodeURIComponent(window.location.href);
+          // Stay on "Loading…" while the browser navigates away.
           window.location.href = `https://claraity.app/login?returnTo=${here}`;
           return;
         }
         setUser(u);
       })
-      .catch(() => alive && setUser(null));
+      .catch((e) => {
+        if (!alive) return;
+        setAuthError(friendlyError(e));
+        setUser("error");
+      });
     return () => {
       alive = false;
     };
@@ -63,220 +124,321 @@ export function AppShell() {
       </div>
     );
   }
-  if (!user) return null; // redirecting
+  if (user === "error") {
+    return (
+      <div className="flex h-full items-center justify-center bg-background">
+        <EmptyState
+          icon={<AlertCircle />}
+          title="Couldn't load your account"
+          description={authError ?? undefined}
+          action={<Button onClick={() => window.location.reload()}>Reload</Button>}
+        />
+      </div>
+    );
+  }
+  if (!user) return null; // redirecting to claraity.app/login
 
+  const { pathname } = location;
   const onLibraryPath =
-    location.pathname === "/lectures" || location.pathname === "/";
+    pathname === "/" || pathname === "/lectures" || pathname.startsWith("/lectures/");
+  const onViewer = pathname.startsWith("/lectures/");
   const filterParam = new URLSearchParams(location.search).get("filter");
-  const onLibrary = onLibraryPath && filterParam !== "shared";
+  // A lecture opened from My study guides keeps that section highlighted.
+  const fromStudyguides =
+    onViewer && (location.state as { from?: string } | null)?.from === "studyguides";
+  const onLibrary = onLibraryPath && filterParam !== "shared" && !fromStudyguides;
   const onShared = onLibraryPath && filterParam === "shared";
-  const onStudyguides = location.pathname === "/studyguides";
-  const onCommunity = location.pathname === "/community";
+  const onStudyguides = pathname === "/studyguides" || fromStudyguides;
+  const onCommunity = pathname === "/community";
 
-  // The collapsed rail is a desktop affordance; on mobile the drawer is
-  // always full-width/expanded.
-  const effCollapsed = collapsed && !isMobile;
-  const title = onShared
+  // The collapsed rail is a desktop affordance; the mobile drawer is always
+  // expanded. Below 1280px the rail starts collapsed unless the user chose.
+  const effCollapsed = !isMobile && (collapsedPref ?? isNarrow);
+
+  const routeTitle = onShared
     ? "Shared with me"
-    : onStudyguides
-      ? "My Studyguides"
+    : pathname === "/studyguides"
+      ? "My study guides"
       : onCommunity
         ? "Community"
-        : location.pathname.startsWith("/lectures/")
-          ? "Lecture"
+        : onViewer
+          ? "Project"
           : "My Library";
+  const topBarTitle = pageTitle ?? routeTitle;
+
+  const iconClass = "size-4.5";
 
   return (
-    <div className="flex h-full flex-col md:flex-row">
-      {/* Mobile top bar — hamburger + section title + logo (md:hidden). */}
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card/85 px-3 backdrop-blur-xl md:hidden">
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-        <span className="flex-1 truncate text-base font-semibold text-foreground">{title}</span>
-        <img
-          src="/Streamline_logo.png"
-          alt="Streamline"
-          className="h-[18px] w-auto select-none brightness-0 dark:brightness-100"
-          draggable={false}
-        />
-      </header>
+    <TooltipProvider>
+      <div className="flex h-full flex-col md:flex-row">
+        {/* Mobile top bar — menu button + page title + logo (md:hidden). */}
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/85 px-2 backdrop-blur-xl md:hidden">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
+            aria-expanded={mobileOpen}
+            className="[&_svg]:size-5"
+          >
+            <Menu />
+          </Button>
+          <span className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
+            {topBarTitle}
+          </span>
+          <img
+            src="/Streamline_logo.png"
+            alt="Streamline"
+            className="mr-1 h-[18px] w-auto shrink-0 select-none brightness-0 dark:brightness-100"
+            draggable={false}
+          />
+        </header>
 
-      {/* Backdrop behind the open mobile drawer. */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] md:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden
-        />
-      )}
-
-      {/* .sidebar — static/collapsible on desktop, slide-in drawer on mobile. */}
-      <aside
-        className={cn(
-          "flex shrink-0 flex-col gap-1 border-r border-border bg-card/85 backdrop-blur-xl",
-          // Mobile: fixed slide-in drawer (always 220px expanded).
-          "fixed inset-y-0 left-0 z-50 w-[220px] px-3 py-4 transition-transform duration-200",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-          // Desktop: in-flow, collapsible, no transform.
-          "md:static md:z-auto md:translate-x-0 md:transition-[width,min-width]",
-          collapsed
-            ? "md:w-14 md:min-w-14 md:items-center md:px-1.5 md:py-4"
-            : "md:w-[220px] md:min-w-[220px] md:px-3 md:py-4",
+        {/* Backdrop behind the open mobile drawer. */}
+        {mobileOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] md:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden
+          />
         )}
-      >
-        {/* .sidebar-header — logo + avatar (+ close button on mobile). */}
-        <div
+
+        {/* Sidebar — static/collapsible on desktop, slide-in drawer on mobile. */}
+        <aside
+          aria-label="Sidebar"
+          inert={isMobile && !mobileOpen}
           className={cn(
-            "flex items-center pb-5 pt-3",
-            effCollapsed ? "justify-center px-0" : "justify-between px-2",
+            "flex shrink-0 flex-col border-r border-border bg-card/85 backdrop-blur-xl",
+            // Mobile: fixed slide-in drawer (always 220px expanded).
+            "fixed inset-y-0 left-0 z-50 w-[220px] px-3 py-4 transition-transform duration-200",
+            mobileOpen ? "translate-x-0" : "-translate-x-full",
+            // Desktop: in-flow, collapsible, no transform.
+            "md:static md:z-auto md:translate-x-0 md:transition-[width,min-width]",
+            effCollapsed
+              ? "md:w-14 md:min-w-14 md:items-center md:px-2"
+              : "md:w-[220px] md:min-w-[220px] md:px-3",
           )}
         >
-          {!effCollapsed && (
-            <Link
-              to="/lectures"
-              className="flex items-center overflow-hidden transition-opacity hover:opacity-80"
-            >
-              <img
-                src="/Streamline_logo.png"
-                alt="Streamline"
-                className="h-[22px] w-auto select-none brightness-0 dark:brightness-100"
-                draggable={false}
-              />
-            </Link>
-          )}
-          <div className="flex items-center gap-1.5">
-            <Avatar user={user} size={26} />
-            <button
-              type="button"
-              onClick={() => setMobileOpen(false)}
-              aria-label="Close menu"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* .sidebar-nav — gap 2px, padding-top 100px. */}
-        <nav className="flex flex-1 flex-col gap-0.5 pt-[100px]">
-          <NavRow
-            to="/lectures"
-            icon={<LibraryIcon className="h-[18px] w-[18px]" />}
-            label="My Library"
-            active={onLibrary}
-            collapsed={effCollapsed}
-          />
-          <NavRow
-            to="/lectures?filter=shared"
-            icon={<Users className="h-[18px] w-[18px]" />}
-            label="Shared with me"
-            active={onShared}
-            collapsed={effCollapsed}
-          />
-          <NavRow
-            to="/studyguides"
-            icon={<NotebookText className="h-[18px] w-[18px]" />}
-            label="My Studyguides"
-            active={onStudyguides}
-            collapsed={effCollapsed}
-          />
-          <NavRow
-            to="/community"
-            icon={<CommunityIcon className="h-[18px] w-[18px]" />}
-            label="Community"
-            active={onCommunity}
-            collapsed={effCollapsed}
-          />
-
-          {/* Cross-app shortcuts — the rest of the CLARAiTY family (CLARAiTY
-              + StreamlineVX + AudioFile; excludes Streamline itself). Pinned
-              to the bottom of the nav (mt-auto) with a divider on top. Each
-              row = ↗ arrow + the app's 16px icon; the light CLARAiTY /
-              AudioFile icons get a hairline ring. Collapses to the icon. */}
-          <div className="mt-auto flex flex-col gap-0.5 border-t border-border pt-2">
-            <CrossAppShortcut href="https://claraity.app" label="CLARAiTY" icon="/claraity-icon.png" light collapsed={effCollapsed} />
-            <CrossAppShortcut href="https://claraity.app/streamlinevx" label="StreamlineVX" icon="/vx-logo.png" collapsed={effCollapsed} />
-            <CrossAppShortcut href="https://audiofile.claraity.app" label="AudioFile" icon="/audiofile-icon.png" light collapsed={effCollapsed} />
-          </div>
-        </nav>
-
-        {/* .sidebar-footer — theme toggle + (desktop-only) collapse control. */}
-        <div className="mt-2 flex w-full flex-col items-center border-t border-border p-2">
-          {effCollapsed && (
-            <CollapseButton
-              onClick={() => setCollapsed(false)}
-              title="Expand sidebar"
-              className="mb-2"
-            />
-          )}
-          <div className="flex w-full items-center justify-between">
-            {/* .theme-toggle — gap 6px, padding 6px 10px, radius-sm. */}
-            <button
-              type="button"
-              onClick={toggleTheme}
-              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              className={cn(
-                "flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                effCollapsed && "justify-center",
-              )}
-            >
-              {theme === "dark" ? (
-                <Sun className="h-[15px] w-[15px]" />
-              ) : (
-                <Moon className="h-[15px] w-[15px]" />
-              )}
-              {!effCollapsed && <span>{theme === "dark" ? "Light" : "Dark"}</span>}
-            </button>
-
-            {/* Collapse is a desktop-only affordance. */}
-            {!effCollapsed && !isMobile && (
-              <CollapseButton onClick={() => setCollapsed(true)} title="Collapse sidebar" />
+          {/* Header row — logo + collapse (desktop) / close (mobile).
+              Collapsed: the expand button alone, centered. */}
+          <div
+            className={cn(
+              "flex w-full items-center pb-4 pt-3",
+              effCollapsed ? "justify-center" : "justify-between pl-2",
+            )}
+          >
+            {!effCollapsed && (
+              <Link
+                to="/lectures"
+                className="flex items-center overflow-hidden rounded-md transition-opacity hover:opacity-80"
+              >
+                <img
+                  src="/Streamline_logo.png"
+                  alt="Streamline"
+                  className="h-[22px] w-auto select-none brightness-0 dark:brightness-100"
+                  draggable={false}
+                />
+              </Link>
+            )}
+            {isMobile ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close menu"
+                className="text-muted-foreground"
+              >
+                <X />
+              </Button>
+            ) : (
+              <Tip
+                side={effCollapsed ? "right" : "bottom"}
+                label={effCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setCollapsedPref(!effCollapsed)}
+                  aria-label={effCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  className="text-muted-foreground"
+                >
+                  <PanelLeft />
+                </Button>
+              </Tip>
             )}
           </div>
-        </div>
-      </aside>
 
-      <main className="flex-1 overflow-auto">
-        <Outlet />
-      </main>
+          <nav aria-label="Main" className="flex w-full flex-col gap-0.5 pt-2">
+            <NavRow
+              to="/lectures"
+              icon={<LibraryIcon className={iconClass} />}
+              label="My Library"
+              active={onLibrary}
+              collapsed={effCollapsed}
+            />
+            <NavRow
+              to="/lectures?filter=shared"
+              icon={<Users className={iconClass} />}
+              label="Shared with me"
+              active={onShared}
+              collapsed={effCollapsed}
+            />
+            <NavRow
+              to="/studyguides"
+              icon={<NotebookText className={iconClass} />}
+              label="My study guides"
+              active={onStudyguides}
+              collapsed={effCollapsed}
+            />
+            <NavRow
+              to="/community"
+              icon={<CommunityIcon className={iconClass} />}
+              label="Community"
+              active={onCommunity}
+              collapsed={effCollapsed}
+            />
+          </nav>
+
+          <div className="flex-1" />
+
+          {/* Cross-app shortcuts — the rest of the CLARAiTY family (excludes
+              Streamline itself). Same-tab navigation. */}
+          <div className="flex w-full flex-col gap-0.5 pb-2">
+            {!effCollapsed && <div className="eyebrow px-2.5 pb-1">CLARAiTY apps</div>}
+            <CrossAppShortcut
+              href="https://claraity.app"
+              label="CLARAiTY"
+              icon="/claraity-icon.png"
+              light
+              collapsed={effCollapsed}
+            />
+            <CrossAppShortcut
+              href="https://claraity.app/streamlinevx"
+              label="StreamlineVX"
+              icon="/vx-logo.png"
+              collapsed={effCollapsed}
+            />
+            <CrossAppShortcut
+              href="https://audiofile.claraity.app"
+              label="AudioFile"
+              icon="/audiofile-icon.png"
+              light
+              collapsed={effCollapsed}
+            />
+          </div>
+
+          <AccountMenu user={user} collapsed={effCollapsed} theme={theme} onThemeChange={setTheme} />
+        </aside>
+
+        <main className="min-w-0 flex-1 overflow-auto">
+          <PageTitleContext.Provider value={setPageTitle}>
+            <Outlet />
+          </PageTitleContext.Provider>
+        </main>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function displayName(user: SessionUser): string {
+  return [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email;
+}
+
+/** Account row at the foot of the sidebar: avatar + name + email, opening a
+ *  menu with the account details, the Appearance (theme) choice and a link
+ *  back to CLARAiTY. Collapsed rail → avatar-only button with a tooltip. */
+function AccountMenu({
+  user,
+  collapsed,
+  theme,
+  onThemeChange,
+}: {
+  user: SessionUser;
+  collapsed: boolean;
+  theme: Theme;
+  onThemeChange: (t: Theme) => void;
+}) {
+  const name = displayName(user);
+  const showEmailLine = name !== user.email;
+  const ringClass =
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
+  return (
+    <div className={cn("flex w-full border-t border-border pt-2", collapsed && "justify-center")}>
+      <DropdownMenu>
+        <Tip side="right" label="Account" disabled={!collapsed}>
+          <DropdownMenuTrigger asChild>
+            {collapsed ? (
+              <button
+                type="button"
+                aria-label="Account"
+                className={cn(
+                  "flex size-10 items-center justify-center rounded-lg transition-colors hover:bg-accent data-[state=open]:bg-accent",
+                  ringClass,
+                )}
+              >
+                <Avatar user={user} size={28} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent data-[state=open]:bg-accent",
+                  ringClass,
+                )}
+              >
+                <Avatar user={user} size={28} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-medium text-foreground">{name}</span>
+                  {showEmailLine && (
+                    <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                  )}
+                </span>
+                <ChevronsUpDown className="ml-auto size-4 shrink-0 text-muted-foreground" />
+              </button>
+            )}
+          </DropdownMenuTrigger>
+        </Tip>
+        <DropdownMenuContent
+          side={collapsed ? "right" : "top"}
+          align={collapsed ? "end" : "start"}
+          className="min-w-56"
+        >
+          <DropdownMenuLabel className="flex flex-col gap-0.5 py-2">
+            <span className="truncate text-sm font-medium text-foreground">{name}</span>
+            {showEmailLine && <span className="truncate">{user.email}</span>}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>Appearance</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={theme}
+            onValueChange={(v) => onThemeChange(v === "dark" ? "dark" : "light")}
+          >
+            <DropdownMenuRadioItem value="light">
+              <Sun />
+              Light
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="dark">
+              <Moon />
+              Dark
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <a href="https://claraity.app">
+              <ExternalLink />
+              Open CLARAiTY
+            </a>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
 
-/** .sidebar-collapse-btn — 28×28, radius 6px, plain panel glyph (matches
- *  Claraity exactly; same icon for expand + collapse). */
-function CollapseButton({
-  onClick,
-  title,
-  className,
-}: {
-  onClick: () => void;
-  title: string;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-        className,
-      )}
-    >
-      <PanelLeft className="h-4 w-4" />
-    </button>
-  );
-}
-
-/** Circular avatar — real profile photo (matches Claraity) with a
- *  sky-tinted initial fallback. */
+/** Circular avatar — real profile photo (matches Claraity) with a tinted
+ *  initial fallback. Decorative: the name is always shown or labelled next
+ *  to it. */
 function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
   const [imgError, setImgError] = useState(false);
   const initial = (user.firstName?.[0] || user.email?.[0] || "?").toUpperCase();
@@ -286,11 +448,10 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
     return (
       <img
         src={user.profilePicture!}
-        alt={user.email}
-        title={user.email}
+        alt=""
         referrerPolicy="no-referrer"
         onError={() => setImgError(true)}
-        className="shrink-0 select-none rounded-full object-cover transition-[opacity,transform] hover:scale-105 hover:opacity-85"
+        className="shrink-0 select-none rounded-full object-cover"
         style={{ width: size, height: size }}
         draggable={false}
       />
@@ -298,21 +459,59 @@ function Avatar({ user, size = 28 }: { user: SessionUser; size?: number }) {
   }
 
   return (
-    <div
-      className="flex shrink-0 select-none items-center justify-center rounded-full bg-primary/20 font-semibold text-primary transition-[opacity,transform] hover:scale-105 hover:opacity-85"
+    <span
+      aria-hidden
+      className="flex shrink-0 select-none items-center justify-center rounded-full bg-primary/15 font-semibold text-brand-text"
       style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
-      title={user.email}
-      aria-label={user.email}
     >
       {initial}
-    </div>
+    </span>
   );
 }
 
-/** Cross-app shortcut row — a ↗ arrow + the target app's icon, styled like
- *  an idle NavRow. External link to a sibling CLARAiTY-family app. Light
- *  icons (CLARAiTY / AudioFile) get a hairline ring so their edge reads on
- *  the light sidebar; collapses to the app icon only. */
+const rowBase =
+  "flex items-center rounded-lg text-sm font-medium transition-colors";
+const rowExpanded = "h-9 w-full gap-2.5 px-2.5";
+const rowCollapsed = "size-10 justify-center px-0";
+const rowIdle = "text-muted-foreground hover:bg-accent hover:text-foreground";
+
+/** Sidebar nav row. Active = tinted fill + brand text + 600. Collapsed →
+ *  centered icon-only square with a right-side tooltip. */
+function NavRow({
+  to,
+  icon,
+  label,
+  active,
+  collapsed,
+}: {
+  to: string;
+  icon: ReactNode;
+  label: string;
+  active: boolean;
+  collapsed: boolean;
+}) {
+  return (
+    <Tip side="right" label={label} disabled={!collapsed}>
+      <Link
+        to={to}
+        aria-label={collapsed ? label : undefined}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          rowBase,
+          collapsed ? rowCollapsed : rowExpanded,
+          active ? "bg-primary/12 font-semibold text-brand-text" : rowIdle,
+        )}
+      >
+        <span className="flex w-6 shrink-0 items-center justify-center">{icon}</span>
+        {!collapsed && <span className="truncate">{label}</span>}
+      </Link>
+    </Tip>
+  );
+}
+
+/** Cross-app shortcut — app icon + name + trailing ↗, styled like an idle
+ *  NavRow. Light icons (CLARAiTY / AudioFile) get a hairline ring so their
+ *  edge reads on the light sidebar. Collapsed → icon only, with a tooltip. */
 function CrossAppShortcut({
   href,
   label,
@@ -327,79 +526,30 @@ function CrossAppShortcut({
   collapsed: boolean;
 }) {
   return (
-    <a
-      href={href}
-      title={label}
-      className={cn(
-        "flex items-center gap-2.5 rounded-md text-sm font-medium transition-all",
-        collapsed ? "justify-center p-2.5" : "px-3 py-1",
-        "text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-    >
-      {!collapsed && (
+    <Tip side="right" label={label} disabled={!collapsed}>
+      <a
+        href={href}
+        aria-label={collapsed ? label : undefined}
+        className={cn(rowBase, collapsed ? rowCollapsed : rowExpanded, rowIdle)}
+      >
         <span className="flex w-6 shrink-0 items-center justify-center">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-[15px] w-[15px]"
-          >
-            <line x1="6" y1="19" x2="19" y2="6" />
-            <polyline points="9 6 19 6 19 16" />
-          </svg>
+          <img
+            src={icon}
+            alt=""
+            className={cn(
+              "size-4 shrink-0 rounded-sm",
+              light && "shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]",
+            )}
+            draggable={false}
+          />
         </span>
-      )}
-      {/* App icon — always shown; in the collapsed rail it's the only mark
-          (centered), which is how you tell the shortcuts apart. */}
-      <img
-        src={icon}
-        alt={label}
-        className={cn(
-          "h-4 w-4 shrink-0 rounded-[4px]",
-          light && "shadow-[0_0_0_0.5px_rgba(0,0,0,0.12)]",
+        {!collapsed && (
+          <>
+            <span className="truncate">{label}</span>
+            <ArrowUpRight className="ml-auto size-3.5 shrink-0 text-muted-foreground/60" />
+          </>
         )}
-        draggable={false}
-      />
-    </a>
-  );
-}
-
-/** .nav-item — gap 10px, padding 10px 12px, radius-md, font 14/500,
- *  hover scale 1.02, active = accent text + 600 + tinted bg. Collapsed
- *  → centered icon-only with 10px padding + label tooltip. */
-function NavRow({
-  to,
-  icon,
-  label,
-  active,
-  collapsed,
-}: {
-  to: string;
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  collapsed: boolean;
-}) {
-  return (
-    <Link
-      to={to}
-      title={collapsed ? label : undefined}
-      className={cn(
-        "flex items-center gap-2.5 rounded-md text-sm font-medium transition-all",
-        collapsed ? "justify-center p-2.5" : "px-3 py-2.5",
-        active
-          ? "bg-primary/15 font-semibold text-primary"
-          : "text-muted-foreground hover:scale-[1.02] hover:bg-accent hover:text-foreground",
-      )}
-    >
-      {/* .nav-icon — width 24px, centered. */}
-      <span className="flex w-6 shrink-0 items-center justify-center">
-        {icon}
-      </span>
-      {!collapsed && <span className="truncate">{label}</span>}
-    </Link>
+      </a>
+    </Tip>
   );
 }

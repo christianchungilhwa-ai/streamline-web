@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ApiError, generateStudyguide, type StudyguideEvent } from "@/lib/api";
+import { ApiError, generateStudyguide, type StudyguideEvent, type StudyguideMeta } from "@/lib/api";
 import {
   blueprintSections,
   displayMarkdown,
@@ -9,11 +8,34 @@ import {
   regenerateStudyguideSection,
   type ResolvedStudyguide,
 } from "@/lib/studyguideApi";
+import { friendlyError } from "@/lib/errors";
+import { formatDate, formatDateFull, plural } from "@/lib/format";
+import { humanize } from "@/lib/status";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Callout } from "@/components/ui/callout";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SgMarkdown } from "@/components/SgMarkdown";
 import {
-  ChevronRight,
+  AlertCircle,
   Download,
   FileDown,
   FileText,
@@ -22,7 +44,6 @@ import {
   Printer,
   RefreshCw,
   Sparkles,
-  X,
 } from "lucide-react";
 
 type State =
@@ -30,22 +51,31 @@ type State =
   | { kind: "empty" }
   | { kind: "generating"; phase: string; done: number; total: number }
   | { kind: "ready"; sg: ResolvedStudyguide }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; stage: "load" | "generate" };
 
-/** Studyguide reader + generator for a single lecture.
- *  - On mount, fetches the cached studyguide (if any).
+/** Phase label while the writer is producing sections; the generating
+ *  view swaps it for "Writing section x of y" once totals are known. */
+const WRITING_PHASE = "Writing sections…";
+
+/** Study guide reader + generator for a single lecture.
+ *  - On mount, fetches the cached study guide (if any).
  *  - If none, shows a "Generate" CTA → streams generation (SSE) with
  *    phase + section progress, then renders the markdown.
  *  - Once present, renders the server-resolved markdown (slide/nano
- *    images, drawio diagrams, sg-pair tabs) with a toolbar offering
- *    export (.md download + print-to-PDF) and full or per-section
- *    regeneration.
+ *    images, drawio diagrams, sg-pair tabs) under a toolbar row with the
+ *    generated date and section count, an Export menu (.md download +
+ *    print-to-PDF) and an options menu for full (confirmed) or
+ *    per-section regeneration.
  *  The server persists the result, so re-opening just GETs the cache. */
 export function StudyguidePanel({ lectureId }: { lectureId: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [regenSection, setRegenSection] = useState<number | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [confirmRegen, setConfirmRegen] = useState(false);
+  // Bumped by "Try again" after a failed load to re-run the fetch effect.
+  const [reloadKey, setReloadKey] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const optionsRef = useRef<HTMLButtonElement>(null);
   // Monotonic token invalidating any in-flight resolved-copy poll when
   // the lecture changes, a newer poll starts, or the panel unmounts.
   const pollRef = useRef(0);
@@ -101,20 +131,21 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
     setState({ kind: "loading" });
     setRegenSection(null);
     setRegenError(null);
+    setConfirmRegen(false);
     getResolvedStudyguide(lectureId)
       .then((sg) => {
         if (!alive) return;
         setState(sg?.markdown ? { kind: "ready", sg } : { kind: "empty" });
         pollWhileResolving(sg);
       })
-      .catch((e) => alive && setState({ kind: "error", message: String(e?.message ?? e) }));
+      .catch((e) => alive && setState({ kind: "error", message: friendlyError(e), stage: "load" }));
     return () => {
       alive = false;
       pollRef.current++;
       abortRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lectureId]);
+  }, [lectureId, reloadKey]);
 
   async function generate() {
     setState({ kind: "generating", phase: "Starting…", done: 0, total: 0 });
@@ -133,11 +164,16 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
                 : { kind: "generating", phase: phaseLabel(ev.name), done: 0, total: 0 },
             );
           } else if (ev.type === "section") {
-            setState({
-              kind: "generating",
-              phase: "Writing sections…",
-              done: ev.index + 1,
-              total: ev.total,
+            // Count completed sections rather than trusting the index, so
+            // progress stays monotonic if sections land out of order.
+            setState((s) => {
+              const prev = s.kind === "generating" ? s.done : 0;
+              return {
+                kind: "generating",
+                phase: WRITING_PHASE,
+                done: Math.min(ev.total, prev + 1),
+                total: ev.total,
+              };
             });
           } else if (ev.type === "done") {
             // Show the raw markdown immediately; the resolved payload
@@ -146,7 +182,7 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
             setState({ kind: "ready", sg: { markdown: ev.markdown, meta: ev.meta } });
           } else if (ev.type === "error") {
             gotError = true;
-            setState({ kind: "error", message: ev.message });
+            setState({ kind: "error", message: streamErrorMessage(ev.message), stage: "generate" });
           }
         },
         ctrl.signal,
@@ -162,13 +198,17 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
             ? { kind: "ready", sg }
             : s.kind === "ready"
               ? s
-              : { kind: "error", message: "Generation finished but no studyguide was returned." },
+              : {
+                  kind: "error",
+                  message: "Generation finished, but no study guide came back. Please try again.",
+                  stage: "generate",
+                },
         );
         pollWhileResolving(sg);
       }
     } catch (e: unknown) {
       if (ctrl.signal.aborted) return;
-      setState({ kind: "error", message: String((e as Error)?.message ?? e) });
+      setState({ kind: "error", message: friendlyError(e), stage: "generate" });
     }
   }
 
@@ -184,7 +224,7 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
     } catch (e: unknown) {
       // A proxy/edge timeout (502/504) or dropped connection usually
       // means the server is STILL writing the section — poll for the
-      // refreshed studyguide instead of showing a false failure.
+      // refreshed study guide instead of showing a false failure.
       const status = e instanceof ApiError ? e.status : null;
       if (status === 502 || status === 504 || status === 0) {
         const landed = await waitForRegenLanding(beforeGeneratedAt);
@@ -197,7 +237,7 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
           "Regeneration is taking longer than expected — it may still finish; check back in a minute.",
         );
       } else {
-        setRegenError(String((e as Error)?.message ?? e));
+        setRegenError(friendlyError(e));
       }
     } finally {
       setRegenSection(null);
@@ -205,7 +245,7 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
   }
 
   /** Print-to-PDF: flag the document so the @media print stylesheet in
-   *  index.css isolates the studyguide (print-root pattern), then hand
+   *  index.css isolates the study guide (print-root pattern), then hand
    *  off to the browser's print dialog ("Save as PDF"). */
   function exportPdf() {
     const cleanup = () => {
@@ -225,69 +265,76 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
 
   if (state.kind === "loading") {
     return (
-      <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading studyguide…
+      <div
+        role="status"
+        className="flex items-center justify-center gap-2 px-4 py-12 text-sm text-muted-foreground"
+      >
+        <Loader2 className="size-4 animate-spin" />
+        Loading study guide…
       </div>
     );
   }
 
   if (state.kind === "empty") {
     return (
-      <div className="mx-auto max-w-md p-10 text-center">
-        <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-          <FileText className="h-7 w-7" />
-        </span>
-        <h2 className="text-lg font-semibold">No studyguide yet</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Generate an AI study guide from this lecture — distilled notes,
-          key points, and concept breakdowns drawn from the aligned slides
-          and transcript.
-        </p>
-        <Button onClick={generate} className="mt-5">
-          <Sparkles />
-          Generate study guide
-        </Button>
-      </div>
+      <EmptyState
+        icon={<FileText />}
+        title="No study guide yet"
+        description="Generate a study guide from this lecture — distilled notes, key points and concept breakdowns drawn from the aligned slides and transcript."
+        action={
+          <Button onClick={generate}>
+            <Sparkles />
+            Generate study guide
+          </Button>
+        }
+      />
     );
   }
 
   if (state.kind === "generating") {
-    const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : null;
+    const writing = state.phase === WRITING_PHASE && state.total > 0;
+    const heading = writing ? `Writing section ${state.done} of ${state.total}` : state.phase;
     return (
-      <div className="mx-auto max-w-md p-10 text-center">
-        <Loader2 className="mx-auto h-7 w-7 animate-spin text-primary" />
-        <h2 className="mt-4 text-base font-semibold">{state.phase}</h2>
+      <div
+        role="status"
+        aria-live="polite"
+        className="mx-auto flex max-w-md flex-col items-center px-6 py-12 text-center md:py-16"
+      >
+        <Loader2 className="size-7 animate-spin text-primary" aria-hidden />
+        <h2 className="section-title mt-4">{heading}</h2>
         {state.total > 0 && (
-          <>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Section {state.done} of {state.total}
-            </p>
-            <div className="mx-auto mt-4 h-1.5 max-w-xs overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full bg-primary transition-[width]"
-                style={{ width: `${pct ?? 0}%` }}
-              />
-            </div>
-          </>
+          <Progress
+            value={(state.done / state.total) * 100}
+            label="Study guide progress"
+            className="mx-auto mt-4 max-w-xs"
+          />
         )}
-        <p className="mt-4 text-xs text-muted-foreground">
-          This can take a minute — Opus is reading the whole lecture.
-        </p>
+        <p className="mt-4 text-xs text-muted-foreground">This usually takes a few minutes.</p>
       </div>
     );
   }
 
   if (state.kind === "error") {
+    const loadFailed = state.stage === "load";
     return (
-      <div className="mx-auto max-w-md p-10 text-center">
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+      <div className="mx-auto max-w-md px-4 py-12 sm:px-6 md:py-16">
+        <Callout
+          tone="danger"
+          icon={<AlertCircle />}
+          title={loadFailed ? "Couldn't load the study guide" : "Couldn't generate the study guide"}
+          action={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={loadFailed ? () => setReloadKey((k) => k + 1) : generate}
+            >
+              <RefreshCw />
+              Try again
+            </Button>
+          }
+        >
           {state.message}
-        </div>
-        <Button onClick={generate} variant="secondary" className="mt-4">
-          <RefreshCw />
-          Try again
-        </Button>
+        </Callout>
       </div>
     );
   }
@@ -303,145 +350,177 @@ export function StudyguidePanel({ lectureId }: { lectureId: string }) {
       : null;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8 md:px-10">
-      <div className="sg-toolbar mb-6 flex items-center justify-end gap-1">
-        {busy && (
-          <span className="mr-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            Regenerating section {regenSection! + 1}…
-          </span>
-        )}
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 md:px-10 md:py-8">
+      <div className="sg-toolbar mb-6 flex items-center gap-2 border-b border-border pb-3">
+        <div className="mr-auto min-w-0">
+          {busy ? (
+            <span role="status" className="meta flex items-center gap-2">
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+              <span className="truncate">Regenerating section {regenSection + 1}…</span>
+            </span>
+          ) : (
+            <GeneratedMeta meta={sg.meta} fallbackSections={sections.length} />
+          )}
+        </div>
 
         {/* Export menu — .md download + print-optimized PDF. */}
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy}>
               <Download />
               Export
             </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content className={menuContentClass} align="end" sideOffset={6}>
-              <DropdownMenu.Item className={menuItemClass} onSelect={() => downloadMarkdownFile(markdown)}>
-                <FileDown />
-                Download Markdown
-              </DropdownMenu.Item>
-              <DropdownMenu.Item className={menuItemClass} onSelect={exportPdf}>
-                <Printer />
-                Export PDF
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => downloadMarkdownFile(markdown)}>
+              <FileDown />
+              Download Markdown (.md)
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={exportPdf}>
+              <Printer />
+              Print or save as PDF…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-        {/* Overflow menu — regenerate all / per-section, plus meta. */}
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
+        {/* Options menu — regenerate the whole guide (confirmed) or one section. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
+              ref={optionsRef}
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
+              size="icon-sm"
+              className="text-muted-foreground"
               disabled={busy}
-              aria-label="Studyguide options"
+              aria-label="Study guide options"
             >
               <MoreHorizontal />
             </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content className={menuContentClass} align="end" sideOffset={6}>
-              <DropdownMenu.Item className={menuItemClass} onSelect={generate}>
-                <RefreshCw />
-                Regenerate All
-              </DropdownMenu.Item>
-              {sections.length > 0 && (
-                <DropdownMenu.Sub>
-                  <DropdownMenu.SubTrigger className={menuItemClass}>
-                    <RefreshCw />
-                    Regenerate Section
-                    <ChevronRight className="ml-auto" />
-                  </DropdownMenu.SubTrigger>
-                  <DropdownMenu.Portal>
-                    <DropdownMenu.SubContent className={menuContentClass} sideOffset={4}>
-                      {sections.map((s) => (
-                        <DropdownMenu.Item
-                          key={s.sectionIndex}
-                          className={menuItemClass}
-                          onSelect={() => regenerateSection(s.sectionIndex)}
-                        >
-                          {s.sectionIndex + 1}. {s.title}
-                        </DropdownMenu.Item>
-                      ))}
-                    </DropdownMenu.SubContent>
-                  </DropdownMenu.Portal>
-                </DropdownMenu.Sub>
-              )}
-              {sg.meta && (
-                <>
-                  <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                  <div className="px-2.5 py-1.5 text-xs text-muted-foreground">
-                    {metaLines(sg.meta.generatedAt, sg.meta.sectionCount, sg.meta.model).map(
-                      (line, i) => (
-                        <div key={i}>{line}</div>
-                      ),
-                    )}
-                  </div>
-                </>
-              )}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="min-w-52">
+            <DropdownMenuItem onSelect={() => setConfirmRegen(true)}>
+              <RefreshCw />
+              Regenerate entire guide…
+            </DropdownMenuItem>
+            {sections.length > 0 && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <RefreshCw />
+                  Regenerate one section
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {sections.map((s) => (
+                    <DropdownMenuItem
+                      key={s.sectionIndex}
+                      onSelect={() => regenerateSection(s.sectionIndex)}
+                    >
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {s.sectionIndex + 1}.
+                      </span>
+                      <span className="min-w-0 truncate" title={s.title}>
+                        {s.title}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {regenError && (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          <span>{regenError}</span>
-          <button
-            type="button"
-            onClick={() => setRegenError(null)}
-            className="rounded p-0.5 hover:bg-destructive/10"
-            aria-label="Dismiss"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        <Callout
+          tone="danger"
+          icon={<AlertCircle />}
+          onDismiss={() => setRegenError(null)}
+          className="mb-4"
+        >
+          {regenError}
+        </Callout>
       )}
 
-      <article className={cn("studyguide-prose sg-print-root")}>
+      <article className="studyguide-prose sg-print-root">
         <SgMarkdown
           markdown={resolved ? markdown : stripMarkers(markdown)}
           lectureId={lectureId}
           regeneratingTitle={regeneratingTitle}
         />
       </article>
+
+      <Dialog open={confirmRegen} onOpenChange={setConfirmRegen}>
+        <DialogContent
+          className="max-w-md"
+          onCloseAutoFocus={(e) => {
+            // No Dialog trigger exists (it opens from a menu item), so hand
+            // focus back to the options button explicitly.
+            const btn = optionsRef.current;
+            if (btn?.isConnected) {
+              e.preventDefault();
+              btn.focus();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Regenerate the whole study guide?</DialogTitle>
+            <DialogDescription>
+              The current version will be replaced. This can take a few minutes.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost">Cancel</Button>
+            </DialogClose>
+            <Button
+              onClick={() => {
+                setConfirmRegen(false);
+                void generate();
+              }}
+            >
+              <RefreshCw />
+              Regenerate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-const menuContentClass =
-  "z-50 min-w-[210px] max-w-[320px] rounded-xl border bg-popover p-1 text-sm text-popover-foreground shadow-lg";
+/** "Generated Oct 15 · 8 sections" — the toolbar's left-hand meta line. */
+function GeneratedMeta({
+  meta,
+  fallbackSections,
+}: {
+  meta: StudyguideMeta | null | undefined;
+  fallbackSections: number;
+}) {
+  const generatedAt = meta?.generatedAt;
+  const sectionCount = meta?.sectionCount || fallbackSections;
+  const date = generatedAt ? new Date(generatedAt * 1000) : null;
+  if (!date && !sectionCount) return null;
+  const day = date ? formatDate(date) : "";
+  // formatDate says "Today"/"Yesterday"; mid-sentence they read lowercase.
+  const dayText = day === "Today" || day === "Yesterday" ? day.toLowerCase() : day;
+  return (
+    <p className="meta truncate">
+      {date && (
+        <time dateTime={date.toISOString()} title={formatDateFull(date)}>
+          Generated {dayText}
+        </time>
+      )}
+      {date && sectionCount ? " · " : null}
+      {sectionCount ? plural(sectionCount, "section") : null}
+    </p>
+  );
+}
 
-const menuItemClass =
-  "flex w-full cursor-default select-none items-center gap-2 rounded-lg px-2.5 py-1.5 outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground";
-
-function metaLines(
-  generatedAt: number | undefined,
-  sectionCount: number | undefined,
-  model: string | undefined,
-): string[] {
-  const lines: string[] = [];
-  if (generatedAt) {
-    lines.push(
-      `Generated ${new Date(generatedAt * 1000).toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })}`,
-    );
-  }
-  const parts: string[] = [];
-  if (sectionCount) parts.push(`${sectionCount} section${sectionCount === 1 ? "" : "s"}`);
-  if (model) parts.push(model);
-  if (parts.length > 0) lines.push(parts.join(" · "));
-  return lines;
+/** SSE `error` frames carry the server's raw message; show it only when
+ *  it already reads as a sentence, otherwise a plain fallback. */
+function streamErrorMessage(message: string | undefined): string {
+  const msg = (message ?? "").trim();
+  if (msg.length <= 200 && /^[A-Z].*[.!?]$/.test(msg)) return msg;
+  return "Something went wrong while writing the study guide. Please try again.";
 }
 
 /** The RAW (pre-resolution) markdown can carry `SLIDE_IMG:N` reference
@@ -457,7 +536,7 @@ function phaseLabel(name: string): string {
     case "planning":
       return "Planning the study guide…";
     case "writing":
-      return "Writing sections…";
+      return WRITING_PHASE;
     case "monolith":
       return "Assembling…";
     case "persisting":
@@ -469,6 +548,6 @@ function phaseLabel(name: string): string {
     case "done":
       return "Done";
     default:
-      return name ? name[0].toUpperCase() + name.slice(1) + "…" : "Working…";
+      return name ? `${humanize(name)}…` : "Working…";
   }
 }

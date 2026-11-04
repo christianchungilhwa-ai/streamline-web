@@ -1,62 +1,85 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   listLectures,
   renameLecture,
   deleteLecture,
-  ApiError,
+  assetUrl,
   type Lecture,
 } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
+import { formatDate, formatDateFull, plural } from "@/lib/format";
+import { usePageTitle } from "@/lib/usePageTitle";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogFooter,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Segmented, SegmentedItem } from "@/components/ui/segmented";
+import { Input } from "@/components/ui/input";
+import { Callout } from "@/components/ui/callout";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { ProjectCard } from "@/components/ProjectCard";
+import { StatusBadge } from "@/components/StatusBadge";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { cn } from "@/lib/utils";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Plus,
   Loader2,
-  FileVideo,
   Film,
   Search,
   LayoutGrid,
   List,
   ChevronDown,
-  Check,
+  ArrowUpDown,
   X,
   MoreVertical,
   Pencil,
   Trash2,
+  Users,
 } from "lucide-react";
 
-/** Lectures library — the landing page.
+/** Library — the landing page.
  *
  *  Layout:
- *  - Header: page title + "New Project" button (top-right) that
- *    opens NewProjectDialog
- *  - Toolbar: NotebookLM-style row — filter chips (All / My Projects
- *    / Shared with me) on the left, search-icon + view toggle + sort
- *    dropdown on the right
- *  - Body: card grid or list, depending on the view toggle. Every
- *    lecture carries a kebab menu (Rename / Delete) — the web analog
- *    of the Mac app's long-press context menu on a project row
+ *  - PageHeader: title (follows the filter) + project count + "New
+ *    project" (desktop). On phones the AppShell top bar shows the title
+ *    and "New project" becomes an icon button at the end of the toolbar.
+ *  - Toolbar: filter chips (All / My projects / Shared with me) on the
+ *    left; a persistent search field, grid/list view and sort on the
+ *    right.
+ *  - Body: card grid or list. Every project carries an actions menu
+ *    (Rename / Delete) rendered as a sibling of its link.
  *
  *  URL state:
- *  - `?new=1` opens the NewProjectDialog (lets us preserve the old
- *    /lectures/new bookmark). Other toolbar state is local-only — we
- *    can promote to URL params later if deep-linkable filter/sort
- *    becomes useful.
+ *  - `?new=1` opens the NewProjectDialog (keeps the old /lectures/new
+ *    bookmark working).
+ *  - `?filter=mine|shared` selects the chip, so the sidebar's "Shared
+ *    with me" entry can deep-link here. View / sort / search are local.
  *
  *  Filter chips note:
- *  - "All" / "My Projects" currently show the same data (everything
- *    visible to you is yours, since Shared/Community aren't wired
- *    yet). "Shared with me" shows an empty list. The chips exist so
- *    when sharing lands, the surface area is already in place. */
+ *  - "All" / "My projects" currently show the same data (everything
+ *    visible to you is yours until sharing lands). "Shared with me"
+ *    shows an empty state.
+ *
+ *  Freshness: while any project is uploading or processing, the list is
+ *  re-fetched every 5 s (skipped while the tab is hidden) so status
+ *  badges clear on their own. */
 
 type Filter = "all" | "mine" | "shared";
 type View = "grid" | "list";
@@ -77,18 +100,17 @@ const SORT_OPTIONS: { value: Sort; label: string }[] = [
   { value: "alpha", label: "Alphabetical" },
 ];
 
+const POLL_MS = 5000;
+
+const isWorking = (l: Lecture) => l.status === "uploading" || l.status === "processing";
+
 export function LecturesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [lectures, setLectures] = useState<Lecture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter is URL-synced via `?filter=mine|shared` so the sidebar's
-  // "Shared with me" entry can deep-link straight into this view with
-  // the right chip already selected. View / sort / search stay local
-  // because they don't have a sidebar entry that drives them.
   const [view, setView] = useState<View>("grid");
   const [sort, setSort] = useState<Sort>("recent");
-  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [action, setAction] = useState<LectureAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -111,39 +133,102 @@ export function LecturesPage() {
     setSearchParams(next, { replace: true });
   };
 
+  const title = filter === "shared" ? "Shared with me" : "My Library";
+  usePageTitle(title);
+
+  // ── Loading ──────────────────────────────────────────────────────────
+  // `loadNonce` drives a fetch (initial load, Try again, polling);
+  // `loadSettled` ticks after every fetch so the poll timer re-arms even
+  // when a background refresh fails.
+  const [loadNonce, setLoadNonce] = useState(0);
+  const [loadSettled, setLoadSettled] = useState(0);
+  const reload = useCallback(() => setLoadNonce((n) => n + 1), []);
+
+  // Local edits a background refresh must not undo: a rename whose PATCH
+  // is still in flight, and rows deleted after the refresh started.
+  const pendingRenames = useRef(new Map<string, string>());
+  const deletedIds = useRef(new Set<string>());
+
   useEffect(() => {
     let alive = true;
     listLectures()
-      .then((r) => alive && setLectures(r.lectures))
-      .catch((e) => alive && setError(String(e?.message ?? e)));
+      .then((r) => {
+        if (!alive) return;
+        setLectures(
+          r.lectures
+            .filter((l) => !deletedIds.current.has(l.id))
+            .map((l) => {
+              const name = pendingRenames.current.get(l.id);
+              return name === undefined ? l : { ...l, name };
+            }),
+        );
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(friendlyError(e));
+      })
+      .finally(() => {
+        if (alive) setLoadSettled((n) => n + 1);
+      });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [loadNonce]);
+
+  // Poll while anything is still uploading/processing. A tick that lands
+  // while the tab is hidden is deferred until the tab is visible again.
+  const anyWorking = lectures?.some(isWorking) ?? false;
+  useEffect(() => {
+    if (!anyWorking) return;
+    let missed = false;
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === "hidden") missed = true;
+      else reload();
+    }, POLL_MS);
+    const onVisibility = () => {
+      if (missed && document.visibilityState === "visible") {
+        missed = false;
+        reload();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [anyWorking, loadSettled, reload]);
 
   const closeAction = () => setAction((a) => (a ? { ...a, open: false } : a));
 
-  /** Optimistic rename — apply the new name locally right away (same
-   *  instant feedback as the Mac app's local store save), then PATCH.
-   *  On failure, revert just this lecture's name and surface the error. */
+  /** Optimistic rename — apply the new name locally right away, then
+   *  PATCH. On failure, revert just this lecture's name and say so. */
   function applyRename(lecture: Lecture, name: string) {
     setActionError(null);
+    pendingRenames.current.set(lecture.id, name);
     setLectures(
       (ls) => ls?.map((l) => (l.id === lecture.id ? { ...l, name } : l)) ?? ls,
     );
-    renameLecture(lecture.id, name).catch((e: unknown) => {
-      setLectures(
-        (ls) =>
-          ls?.map((l) =>
-            l.id === lecture.id ? { ...l, name: lecture.name } : l,
-          ) ?? ls,
-      );
-      const msg = e instanceof ApiError ? e.message : String(e);
-      setActionError(`Rename failed: ${msg}`);
-    });
+    renameLecture(lecture.id, name)
+      .catch((e: unknown) => {
+        // A newer rename of the same row supersedes this one.
+        if (pendingRenames.current.get(lecture.id) !== name) return;
+        setLectures(
+          (ls) =>
+            ls?.map((l) =>
+              l.id === lecture.id ? { ...l, name: lecture.name } : l,
+            ) ?? ls,
+        );
+        setActionError(`Couldn't rename “${lecture.name}”. ${friendlyError(e)}`);
+      })
+      .finally(() => {
+        if (pendingRenames.current.get(lecture.id) === name) {
+          pendingRenames.current.delete(lecture.id);
+        }
+      });
   }
 
   /** Derived: lectures after filter + search + sort. */
+  const query = searchQuery.trim();
   const displayed = useMemo(() => {
     if (!lectures) return null;
     let list = [...lectures];
@@ -152,10 +237,9 @@ export function LecturesPage() {
     if (filter === "shared") list = [];
 
     // Search by name.
-    const q = searchQuery.trim().toLowerCase();
+    const q = query.toLowerCase();
     if (q) list = list.filter((l) => l.name.toLowerCase().includes(q));
 
-    // Sort.
     switch (sort) {
       case "recent":
         list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
@@ -168,109 +252,116 @@ export function LecturesPage() {
         break;
     }
     return list;
-  }, [lectures, filter, sort, searchQuery]);
+  }, [lectures, filter, sort, query]);
+
+  const rowActions: LectureRowActions = {
+    onRename: (l) => setAction({ kind: "rename", lecture: l, open: true }),
+    onDelete: (l) => setAction({ kind: "delete", lecture: l, open: true }),
+  };
+
+  const newProjectButton = (
+    <Button onClick={() => setDialogOpen(true)} className="max-md:hidden">
+      <Plus />
+      New project
+    </Button>
+  );
 
   return (
-    <div className="mx-auto max-w-6xl p-6 md:p-10">
-      <header className="mb-6 flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="page-title">My Library</h1>
-        </div>
-        <Button onClick={() => setDialogOpen(true)} className="shrink-0">
-          <Plus />
-          New Project
-        </Button>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title={title}
+        description={
+          filter !== "shared" && lectures ? plural(lectures.length, "project") : undefined
+        }
+        actions={newProjectButton}
+      >
+        <Toolbar
+          filter={filter}
+          onFilterChange={setFilter}
+          view={view}
+          onViewChange={setView}
+          sort={sort}
+          onSortChange={setSort}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onNewProject={() => setDialogOpen(true)}
+        />
+      </PageHeader>
 
-      <Toolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        view={view}
-        onViewChange={setView}
-        sort={sort}
-        onSortChange={setSort}
-        searchOpen={searchOpen}
-        searchQuery={searchQuery}
-        onSearchToggle={(open) => {
-          setSearchOpen(open);
-          if (!open) setSearchQuery("");
-        }}
-        onSearchChange={setSearchQuery}
-      />
-
-      {error && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+      {error && lectures === null && (
+        <Callout
+          tone="danger"
+          action={
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => {
+                setError(null);
+                reload();
+              }}
+            >
+              Try again
+            </Button>
+          }
+        >
           {error}
-        </div>
+        </Callout>
       )}
 
       {actionError && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-          <span>{actionError}</span>
-          <button
-            type="button"
-            onClick={() => setActionError(null)}
-            aria-label="Dismiss"
-            className="rounded-full p-1 transition-colors hover:bg-destructive/15"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        <Callout tone="danger" onDismiss={() => setActionError(null)} className="mb-4">
+          {actionError}
+        </Callout>
       )}
 
       {displayed === null && !error && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading Projects…
+          <Loader2 className="size-4 animate-spin" />
+          Loading projects…
         </div>
       )}
 
       {/* Empty states — three flavors:
           (1) Shared filter is active and there's nothing shared yet
-          (2) User has zero lectures at all (first-run)
-          (3) Lectures exist but the search/filter combo returned none */}
+          (2) User has no projects at all (first run)
+          (3) Projects exist but the search matched none */}
       {displayed && displayed.length === 0 && (
         filter === "shared" ? (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
-            <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
-            <h2 className="mt-4 text-lg font-medium">Nothing shared with you yet</h2>
-            <p className="mt-1 max-w-md mx-auto text-sm text-muted-foreground">
-              Lectures and study guides shared by classmates or instructors
-              will appear here.
-            </p>
-          </div>
+          <EmptyState
+            icon={<Users />}
+            title="Nothing shared with you yet"
+            description="Projects and study guides shared by classmates or instructors will appear here."
+          />
         ) : (lectures?.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
-            <FileVideo className="mx-auto h-10 w-10 text-muted-foreground" />
-            <h2 className="mt-4 text-lg font-medium">No Projects yet</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Upload your first PDF + recording to get started.
-            </p>
-            <Button onClick={() => setDialogOpen(true)} className="mt-4">
-              <Plus />
-              New Project
-            </Button>
-          </div>
+          <EmptyState
+            icon={<Film />}
+            title="Your library is empty"
+            description="Add a lecture recording and its slides — Streamline lines them up and writes notes for every slide."
+            action={
+              <Button onClick={() => setDialogOpen(true)}>
+                <Plus />
+                New project
+              </Button>
+            }
+          />
         ) : (
-          <div className="rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
-            No Projects match your search.
-          </div>
+          <EmptyState
+            size="inline"
+            title={`No projects match “${query}”`}
+            action={
+              <Button variant="subtle" size="sm" onClick={() => setSearchQuery("")}>
+                Clear search
+              </Button>
+            }
+          />
         )
       )}
 
       {displayed && displayed.length > 0 && (
         view === "grid" ? (
-          <LectureGrid
-            lectures={displayed}
-            onRename={(l) => setAction({ kind: "rename", lecture: l, open: true })}
-            onDelete={(l) => setAction({ kind: "delete", lecture: l, open: true })}
-          />
+          <LectureGrid lectures={displayed} {...rowActions} />
         ) : (
-          <LectureList
-            lectures={displayed}
-            onRename={(l) => setAction({ kind: "rename", lecture: l, open: true })}
-            onDelete={(l) => setAction({ kind: "delete", lecture: l, open: true })}
-          />
+          <LectureList lectures={displayed} {...rowActions} />
         )
       )}
 
@@ -289,12 +380,13 @@ export function LecturesPage() {
           lecture={action.lecture}
           open={action.open}
           onOpenChange={(open) => !open && closeAction()}
-          onDeleted={(id) =>
-            setLectures((ls) => ls?.filter((l) => l.id !== id) ?? ls)
-          }
+          onDeleted={(id) => {
+            deletedIds.current.add(id);
+            setLectures((ls) => ls?.filter((l) => l.id !== id) ?? ls);
+          }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -307,226 +399,123 @@ interface ToolbarProps {
   onViewChange: (v: View) => void;
   sort: Sort;
   onSortChange: (s: Sort) => void;
-  searchOpen: boolean;
   searchQuery: string;
-  onSearchToggle: (open: boolean) => void;
   onSearchChange: (q: string) => void;
+  onNewProject: () => void;
 }
 
-function Toolbar(props: ToolbarProps) {
-  const {
-    filter,
-    onFilterChange,
-    view,
-    onViewChange,
-    sort,
-    onSortChange,
-    searchOpen,
-    searchQuery,
-    onSearchToggle,
-    onSearchChange,
-  } = props;
+function Toolbar({
+  filter,
+  onFilterChange,
+  view,
+  onViewChange,
+  sort,
+  onSortChange,
+  searchQuery,
+  onSearchChange,
+  onNewProject,
+}: ToolbarProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label ?? "Sort";
 
   return (
-    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      {/* Left: filter chips (or search input when expanded) */}
-      {searchOpen ? (
-        <div className="flex flex-1 items-center gap-2">
-          <Search className="h-4 w-4 text-muted-foreground" />
-          <input
-            autoFocus
-            type="text"
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      {/* Filter chips — scroll sideways on narrow phones instead of
+          wrapping. The vertical padding keeps focus rings unclipped. */}
+      <div className="-mx-4 -my-1 overflow-x-auto px-4 py-1 [scrollbar-width:none] md:mx-0 md:px-0">
+        <Segmented variant="chips" aria-label="Filter" value={filter} onValueChange={onFilterChange}>
+          <SegmentedItem value="all" label="All" />
+          <SegmentedItem value="mine" label="My projects" />
+          <SegmentedItem value="shared" label="Shared with me" />
+        </Segmented>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1 md:flex-none">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            ref={inputRef}
+            type="search"
+            enterKeyHint="search"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Escape") onSearchToggle(false);
+              if (e.key !== "Escape") return;
+              if (searchQuery) {
+                e.preventDefault();
+                onSearchChange("");
+              } else {
+                e.currentTarget.blur();
+              }
             }}
-            placeholder="Search lectures…"
-            aria-label="Search lectures"
-            className="block w-full max-w-md bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            placeholder="Search projects"
+            aria-label="Search projects"
+            className={cn(
+              "h-8 rounded-full bg-card pl-9 pr-8",
+              "transition-[width,color,background-color,border-color,box-shadow]",
+              searchQuery ? "md:w-64" : "md:w-48 md:focus:w-64",
+            )}
           />
-          <button
-            type="button"
-            onClick={() => onSearchToggle(false)}
-            className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            aria-label="Close search"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1">
-          <FilterChip active={filter === "all"} onClick={() => onFilterChange("all")}>
-            All
-          </FilterChip>
-          <FilterChip active={filter === "mine"} onClick={() => onFilterChange("mine")}>
-            My Projects
-          </FilterChip>
-          <FilterChip active={filter === "shared"} onClick={() => onFilterChange("shared")}>
-            Shared with me
-          </FilterChip>
-        </div>
-      )}
-
-      {/* Right: search + view toggle + sort. Hidden when search input
-          is expanded — its X button doubles as the way back. */}
-      {!searchOpen && (
-        <div className="flex items-center gap-2">
-          <IconButton onClick={() => onSearchToggle(true)} aria-label="Search">
-            <Search className="h-4 w-4" />
-          </IconButton>
-          <ViewToggle view={view} onChange={onViewChange} />
-          <SortDropdown value={sort} onChange={onSortChange} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** A pill-shaped filter chip. Active = subtle filled background; idle =
- *  plain text in the muted foreground color. */
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
-        active
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Round icon-only button used for the search trigger. */
-function IconButton({
-  onClick,
-  children,
-  "aria-label": ariaLabel,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  "aria-label": string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Two-segment grid/list view toggle. */
-function ViewToggle({
-  view,
-  onChange,
-}: {
-  view: View;
-  onChange: (v: View) => void;
-}) {
-  return (
-    <div className="flex h-9 items-center rounded-full border border-border bg-card p-0.5">
-      <ViewSegment active={view === "grid"} onClick={() => onChange("grid")} aria-label="Grid view">
-        <LayoutGrid className="h-4 w-4" />
-      </ViewSegment>
-      <ViewSegment active={view === "list"} onClick={() => onChange("list")} aria-label="List view">
-        <List className="h-4 w-4" />
-      </ViewSegment>
-    </div>
-  );
-}
-
-function ViewSegment({
-  active,
-  onClick,
-  children,
-  "aria-label": ariaLabel,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  "aria-label": string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      aria-pressed={active}
-      className={cn(
-        "flex h-8 items-center gap-1 rounded-full px-2.5 text-sm transition-colors",
-        active
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {active && <Check className="h-3.5 w-3.5" />}
-      {children}
-    </button>
-  );
-}
-
-/** Sort dropdown — pill trigger + Radix popover menu. */
-function SortDropdown({
-  value,
-  onChange,
-}: {
-  value: Sort;
-  onChange: (s: Sort) => void;
-}) {
-  const currentLabel = SORT_OPTIONS.find((o) => o.value === value)?.label ?? "Sort";
-  return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          className="flex h-9 items-center gap-1.5 rounded-full border border-border bg-card px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-        >
-          <span>{currentLabel}</span>
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 min-w-[180px] rounded-xl border border-border bg-card p-1 text-sm shadow-lg"
-        >
-          {SORT_OPTIONS.map((opt) => (
-            <DropdownMenu.Item
-              key={opt.value}
-              onSelect={() => onChange(opt.value)}
-              className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2",
-                "outline-none transition-colors",
-                "data-[highlighted]:bg-accent data-[highlighted]:text-foreground",
-              )}
+          {searchQuery && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              shape="pill"
+              aria-label="Clear search"
+              onClick={() => {
+                onSearchChange("");
+                inputRef.current?.focus();
+              }}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
             >
-              <span className="flex h-4 w-4 items-center justify-center text-primary">
-                {value === opt.value && <Check className="h-3.5 w-3.5" />}
-              </span>
-              <span>{opt.label}</span>
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+              <X />
+            </Button>
+          )}
+        </div>
+
+        <Segmented size="sm" aria-label="View" value={view} onValueChange={onViewChange}>
+          <SegmentedItem value="grid" label="Grid view" icon={<LayoutGrid />} iconOnly />
+          <SegmentedItem value="list" label="List view" icon={<List />} iconOnly />
+        </Segmented>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              shape="pill"
+              aria-label={`Sort: ${sortLabel}`}
+              className="max-sm:w-8 max-sm:px-0"
+            >
+              <ArrowUpDown className="text-muted-foreground sm:hidden" />
+              <span className="max-sm:hidden">{sortLabel}</span>
+              <ChevronDown className="text-muted-foreground max-sm:hidden" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={sort} onValueChange={(v) => onSortChange(v as Sort)}>
+              {SORT_OPTIONS.map((opt) => (
+                <DropdownMenuRadioItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button
+          size="icon-sm"
+          shape="pill"
+          className="md:hidden"
+          aria-label="New project"
+          onClick={onNewProject}
+        >
+          <Plus />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -537,16 +526,33 @@ interface LectureRowActions {
   onDelete: (l: Lecture) => void;
 }
 
+function CreatedAt({ lecture }: { lecture: Lecture }) {
+  return (
+    <time dateTime={lecture.createdAt} title={formatDateFull(lecture.createdAt)}>
+      {formatDate(lecture.createdAt)}
+    </time>
+  );
+}
+
 function LectureGrid({
   lectures,
   onRename,
   onDelete,
 }: { lectures: Lecture[] } & LectureRowActions) {
   return (
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] sm:gap-4 lg:gap-5">
       {lectures.map((l) => (
         <li key={l.id}>
-          <LectureCard lecture={l} onRename={onRename} onDelete={onDelete} />
+          <ProjectCard
+            to={`/lectures/${l.id}`}
+            lectureId={l.id}
+            thumbnailKey={l.thumbnailKey}
+            fallbackIcon={<Film />}
+            title={l.name}
+            meta={<CreatedAt lecture={l} />}
+            badge={<StatusBadge status={l.status} overlay />}
+            actions={<LectureActionsMenu lecture={l} onRename={onRename} onDelete={onDelete} />}
+          />
         </li>
       ))}
     </ul>
@@ -564,22 +570,22 @@ function LectureList({
         <li key={l.id} className="relative">
           <Link
             to={`/lectures/${l.id}`}
-            className="flex items-center gap-4 rounded-xl border border-border bg-card p-3 pr-14 transition-colors hover:bg-accent"
+            className={cn(
+              "card-surface flex items-center gap-3 p-2.5 pr-12 transition-colors",
+              "hover:border-foreground/15 hover:bg-muted",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            )}
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5">
-              <Film className="h-5 w-5 text-primary/80" />
-            </span>
+            <ListThumb lecture={l} />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-foreground">
-                {l.name}
-              </div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {new Date(l.createdAt).toLocaleDateString()}
+              <div className="truncate text-sm font-medium text-foreground">{l.name}</div>
+              <div className="meta mt-0.5">
+                <CreatedAt lecture={l} />
               </div>
             </div>
-            <StatusPill status={l.status} />
+            <StatusBadge status={l.status} className="shrink-0" />
           </Link>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+          <div className="absolute right-2 top-1/2 -translate-y-1/2">
             <LectureActionsMenu lecture={l} onRename={onRename} onDelete={onDelete} />
           </div>
         </li>
@@ -588,120 +594,69 @@ function LectureList({
   );
 }
 
-function LectureCard({
-  lecture,
-  onRename,
-  onDelete,
-}: { lecture: Lecture } & LectureRowActions) {
+/** 16:9 mini thumbnail for list rows; falls back to a quiet icon. */
+function ListThumb({ lecture }: { lecture: Lecture }) {
+  const [failed, setFailed] = useState(false);
+  const showImg = !!lecture.thumbnailKey && !failed;
   return (
-    <div className="group relative rounded-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
-      <Link
-        to={`/lectures/${lecture.id}`}
-        className="flex h-[240px] flex-col overflow-hidden rounded-xl border border-border bg-card"
-      >
-        <div className="relative flex h-[120px] items-center justify-center bg-gradient-to-br from-primary/15 to-primary/5">
-          <Film className="h-9 w-9 text-primary/80 transition-transform group-hover:scale-110" />
-          <div className="absolute right-2 top-2">
-            <StatusPill status={lecture.status} />
-          </div>
-        </div>
-        <div className="flex flex-1 flex-col px-3 py-3">
-          <div className="truncate text-sm font-semibold text-foreground">
-            {lecture.name}
-          </div>
-          <div className="mt-auto pt-2 pr-8 text-xs text-muted-foreground">
-            {new Date(lecture.createdAt).toLocaleDateString()}
-          </div>
-        </div>
-      </Link>
-      <div className="absolute bottom-2 right-2">
-        <LectureActionsMenu lecture={lecture} onRename={onRename} onDelete={onDelete} />
-      </div>
-    </div>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const variants: Record<string, string> = {
-    completed: "bg-primary/20 text-primary",
-    processing: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-    uploading: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-    failed: "bg-destructive/15 text-destructive",
-    canceled: "bg-muted text-muted-foreground",
-  };
-  const klass = variants[status] ?? "bg-muted text-muted-foreground";
-  return (
-    <span
-      className={`rounded-full px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm ${klass}`}
-    >
-      {status}
+    <span className="flex h-9 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground/60">
+      {showImg ? (
+        <img
+          src={assetUrl(lecture.id, lecture.thumbnailKey!)}
+          alt=""
+          crossOrigin="use-credentials"
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <Film className="size-4" />
+      )}
     </span>
   );
 }
 
 // ─── Row actions: rename / delete ───────────────────────────────────────
 
-/** Kebab menu with the per-lecture actions. Rendered as a SIBLING of the
- *  row's Link (absolutely positioned over it), never inside it — nesting
- *  a button in an anchor breaks keyboard/AT semantics. */
+/** Actions menu for one project. Rendered as a SIBLING of the row's Link
+ *  (absolutely positioned over it), never inside it — nesting a button in
+ *  an anchor breaks keyboard/AT semantics. */
 function LectureActionsMenu({
   lecture,
   onRename,
   onDelete,
 }: { lecture: Lecture } & LectureRowActions) {
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          shape="pill"
           aria-label={`Actions for ${lecture.name}`}
-          className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground",
-            "transition-colors hover:bg-accent hover:text-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            "data-[state=open]:bg-accent data-[state=open]:text-foreground",
-          )}
+          className="text-muted-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
-          <MoreVertical className="h-4 w-4" />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 min-w-[160px] rounded-xl border border-border bg-card p-1 text-sm shadow-lg"
-        >
-          <DropdownMenu.Item
-            onSelect={() => onRename(lecture)}
-            className={cn(
-              "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2",
-              "outline-none transition-colors",
-              "data-[highlighted]:bg-accent data-[highlighted]:text-foreground",
-            )}
-          >
-            <Pencil className="h-4 w-4" />
-            <span>Rename</span>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            onSelect={() => onDelete(lecture)}
-            className={cn(
-              "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-destructive",
-              "outline-none transition-colors",
-              "data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive",
-            )}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span>Delete</span>
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+          <MoreVertical />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem onSelect={() => onRename(lecture)}>
+          <Pencil />
+          Rename
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={() => onDelete(lecture)}>
+          <Trash2 />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-/** Rename modal — mirrors the Mac app's "Rename Project" alert: seeded
- *  with the current name, trims whitespace, rejects empty names, and
- *  treats an unchanged name as a no-op success (close, no request). */
+/** Rename modal: seeded with the current name, trims whitespace, rejects
+ *  empty names, and treats an unchanged name as a no-op success (close,
+ *  no request). */
 function RenameLectureDialog({
   lecture,
   open,
@@ -715,9 +670,10 @@ function RenameLectureDialog({
 }) {
   const [draft, setDraft] = useState(lecture.name);
   const [formError, setFormError] = useState<string | null>(null);
+  const inputId = useId();
+  const errorId = useId();
 
-  // Fresh draft on every open (parity with the Mac alert, which is
-  // remounted per open so its TextField never carries stale state).
+  // Fresh draft on every open so the field never carries stale state.
   useEffect(() => {
     if (open) {
       setDraft(lecture.name);
@@ -740,52 +696,47 @@ function RenameLectureDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Rename Project</DialogTitle>
-          <DialogDescription>
-            Enter a new name for this lecture.
-          </DialogDescription>
+          <DialogTitle>Rename project</DialogTitle>
+          <DialogDescription>Enter a new name for this project.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="mt-2 space-y-4">
-          <input
-            autoFocus
-            type="text"
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setFormError(null);
-            }}
-            onFocus={(e) => e.currentTarget.select()}
-            placeholder="Project name"
-            aria-label="Project name"
-            maxLength={200}
-            className={cn(
-              "block w-full rounded-2xl border border-border bg-card px-5 py-4",
-              "text-base text-foreground placeholder:text-muted-foreground",
-              "transition-colors",
-              "focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
-              formError &&
-                "border-destructive/60 focus-visible:border-destructive focus-visible:ring-destructive/30",
+        <form onSubmit={onSubmit} className="grid gap-4">
+          <div className="grid gap-1.5">
+            <label htmlFor={inputId} className="text-sm font-medium">
+              Name
+            </label>
+            <Input
+              id={inputId}
+              autoFocus
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setFormError(null);
+              }}
+              onFocus={(e) => e.currentTarget.select()}
+              placeholder="Project name"
+              maxLength={200}
+              aria-invalid={!!formError}
+              aria-describedby={formError ? errorId : undefined}
+            />
+            {formError && (
+              <p id={errorId} className="text-sm text-destructive-text">
+                {formError}
+              </p>
             )}
-          />
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
-          <div className="flex items-center justify-center gap-2 pt-1">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              className="text-primary hover:text-primary"
-            >
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit">Save</Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   );
 }
 
-/** Delete confirmation — names the lecture so there's no ambiguity about
+/** Delete confirmation — names the project so there's no ambiguity about
  *  what's going away. Unlike rename, the removal is NOT optimistic: the
  *  DELETE is awaited (spinner on the button) so a failed delete never
  *  vanishes a row that still exists on the server. */
@@ -818,7 +769,7 @@ function DeleteLectureDialog({
       onDeleted(lecture.id);
       onOpenChange(false);
     } catch (e: unknown) {
-      setDeleteError(e instanceof ApiError ? e.message : String(e));
+      setDeleteError(friendlyError(e));
       setBusy(false);
     }
   }
@@ -832,23 +783,18 @@ function DeleteLectureDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete Project</DialogTitle>
+          <DialogTitle>Delete project?</DialogTitle>
           <DialogDescription>
-            {`Delete "${lecture.name}"? This can't be undone.`}
+            {`“${lecture.name}” will be permanently deleted. This can't be undone.`}
           </DialogDescription>
         </DialogHeader>
-        {deleteError && (
-          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            {deleteError}
-          </div>
-        )}
-        <div className="flex items-center justify-center gap-2 pt-1">
+        {deleteError && <Callout tone="danger">{deleteError}</Callout>}
+        <DialogFooter>
           <Button
             type="button"
             variant="ghost"
             onClick={() => handleOpenChange(false)}
             disabled={busy}
-            className="text-primary hover:text-primary"
           >
             Cancel
           </Button>
@@ -861,7 +807,7 @@ function DeleteLectureDialog({
             {busy && <Loader2 className="animate-spin" />}
             {busy ? "Deleting…" : "Delete"}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
