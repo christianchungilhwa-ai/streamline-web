@@ -116,24 +116,37 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
   // The server refused the uploaded deck at start (content it can't use):
   // the ROI step then offers to replace or drop the deck.
   const [deckRejected, setDeckRejected] = useState<string | null>(null);
-  const [lastRoi, setLastRoi] = useState<ROIRegion | undefined>(undefined);
+  // A note for the ROI step after the deck was replaced there.
+  const [deckNote, setDeckNote] = useState<string | null>(null);
+  // A replacement deck PUT that didn't finish: the server's copy is partial.
+  const [deckIncomplete, setDeckIncomplete] = useState(false);
   const replaceDeckInputRef = useRef<HTMLInputElement | null>(null);
+  // Deck picks are checked asynchronously (first KiB): only the latest pick
+  // may land, and Continue waits until it has.
+  const pickSeq = useRef(0);
+  const [checkingDeck, setCheckingDeck] = useState(false);
 
   const busy = phase === "creating" || phase === "uploading" || phase === "starting";
   // Once the job exists on the server, only leave via explicit buttons.
   const locked = busy || phase === "roi";
   // "error" stays submittable — that's the in-place "Try again".
-  const submitDisabled = !video || (phase !== "idle" && phase !== "error");
+  const submitDisabled = !video || checkingDeck || (phase !== "idle" && phase !== "error");
   // No deck chosen: the server extracts one from the recording.
   const extractDeck = deck === null;
 
   async function pickDeck(file: File | null) {
+    const seq = ++pickSeq.current;
     if (file) {
+      setCheckingDeck(true);
       const problem = await deckProblem(file);
+      if (seq !== pickSeq.current) return; // a newer pick (or removal) won
+      setCheckingDeck(false);
       if (problem) {
         setDeckPickError(problem);
         return;
       }
+    } else {
+      setCheckingDeck(false);
     }
     setDeckPickError(null);
     setDeck(file);
@@ -269,36 +282,55 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
   // Confirm the ROI (or `undefined` → server auto-detects) and start.
   // `source` is explicit because callers may have just changed `deck` in
   // this same event (state updates land on the next render).
-  async function finishStart(roi?: ROIRegion, source: SlideSource = extractDeck ? "extract" : "upload") {
+  async function finishStart(roi?: ROIRegion) {
     if (!created) return;
+    const source: SlideSource = extractDeck ? "extract" : "upload";
+    if (source === "upload" && deckIncomplete) {
+      setDeckRejected(
+        `“${deck?.name}” didn't finish uploading — choose it again, or remove the deck to extract the slides from the recording.`,
+      );
+      return;
+    }
     setError(null);
     setDeckRejected(null);
-    setLastRoi(roi);
+    setDeckNote(null);
     try {
       setPhase("starting");
       // A deck left over from an earlier, failed attempt on this same job
       // is ignored in extract mode — the server builds its own.
       await startLecture(created.id, roi, source);
-      setPhase("done");
-      onOpenChange(false);
-      navigate(`/lectures/${created.id}`);
+      openStarted(created.id);
     } catch (e: unknown) {
+      const status = e instanceof ApiError ? e.status : 0;
       const msg = e instanceof ApiError ? e.message : String(e);
-      // 400/409 on an upload-mode start = the server can't use this deck
-      // (its content isn't a deck it reads). Retrying can't help; offer to
-      // replace or drop the deck without re-uploading the recording.
-      if (source === "upload" && e instanceof ApiError && (e.status === 400 || e.status === 409)) {
-        setDeckRejected(msg);
-      } else {
-        setError(msg);
+      if (status === 409 && /processing/i.test(msg)) {
+        // An earlier attempt did start it (its response was lost): it is
+        // running — open it rather than offering to change the deck.
+        openStarted(created.id);
+        return;
       }
+      // The server can't use the uploaded deck (its content isn't a deck it
+      // reads, it's missing, or it changed): retrying can't help; offer to
+      // replace or drop the deck without re-uploading the recording.
+      const deckProblemFromServer =
+        source === "upload" &&
+        ((status === 400 && !/video/i.test(msg)) || (status === 409 && /deck/i.test(msg)));
+      if (deckProblemFromServer) setDeckRejected(msg);
+      else setError(msg);
       setPhase("roi"); // stay on the ROI screen so they can retry
     }
   }
 
+  function openStarted(id: string) {
+    setPhase("done");
+    onOpenChange(false);
+    navigate(`/lectures/${id}`);
+  }
+
   // From the ROI step after the server refused the deck: upload only the
   // new deck to this job (the recording is already on the server), then
-  // start again with the region the user confirmed.
+  // let the user start again with "Use This Region" — the region on screen
+  // then, not the one sent with the refused attempt.
   async function replaceDeck(file: File) {
     if (!created) return;
     const problem = await deckProblem(file);
@@ -311,7 +343,9 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     uploadAbortRef.current = controller;
     setDeck(file);
     setDeckRejected(null);
+    setDeckNote(null);
     setDeckProgress(0);
+    setDeckIncomplete(true); // until the PUT completes, the server copy is partial
     setPhase("starting");
     try {
       await uploadFile(
@@ -332,12 +366,16 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     } finally {
       if (uploadAbortRef.current === controller) uploadAbortRef.current = null;
     }
-    await finishStart(lastRoi, "upload");
+    setDeckIncomplete(false);
+    setDeckNote(`“${file.name}” uploaded — confirm the slide region to start.`);
+    setPhase("roi");
   }
 
   function dropDeckAndExtract() {
     setDeck(null);
-    void finishStart(lastRoi, "extract");
+    setDeckRejected(null);
+    setDeckIncomplete(false);
+    setDeckNote("No deck — confirm the slide region to build the deck from the recording.");
   }
 
   // Back out during the ROI step: best-effort delete the un-started job so
@@ -351,6 +389,8 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     setError(null);
     setFailedUpload(null);
     setDeckRejected(null);
+    setDeckNote(null);
+    setDeckIncomplete(false);
     setDeckProgress(0);
     setVideoProgress(0);
     onOpenChange(false);
@@ -417,6 +457,11 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
             {phase === "starting" && deck && deckProgress > 0 && deckProgress < 1 && (
               <p className="text-xs text-muted-foreground">
                 Uploading {deck.name}… {Math.round(deckProgress * 100)}%
+              </p>
+            )}
+            {deckNote && !deckRejected && phase === "roi" && (
+              <p className="rounded-xl border border-primary/30 bg-primary/[0.06] p-3 text-sm text-foreground">
+                {deckNote}
               </p>
             )}
             <RoiConfirm
@@ -573,6 +618,7 @@ function FileSelectCard({
   progress: number | null;
   disabled: boolean;
 }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const cardTone =
     accent === "sky"
       ? "border-primary/50 bg-primary/[0.06] hover:border-primary/70 hover:bg-primary/10"
@@ -586,12 +632,14 @@ function FileSelectCard({
     // The remove button sits OUTSIDE the <label>: inside it, a <button> would
     // become the label's labeled control and every click on the card would
     // "remove" instead of opening the file picker.
-    <div className="relative">
+    <div className="relative h-full">
     <label
       className={cn(
-        "group relative flex min-h-[200px] cursor-pointer flex-col items-center justify-center",
+        "group relative flex h-full min-h-[200px] cursor-pointer flex-col items-center justify-center",
         "gap-3 overflow-hidden rounded-2xl border-2 border-dashed",
         "px-6 py-10 text-center transition-all",
+        // The input is visually hidden but focusable: show its focus on the card.
+        "focus-within:ring-2 focus-within:ring-primary/40",
         cardTone,
         disabled && "pointer-events-none opacity-60",
       )}
@@ -618,9 +666,12 @@ function FileSelectCard({
       )}
 
       <input
+        ref={inputRef}
         type="file"
         accept={accept}
-        className="hidden"
+        // sr-only, not display:none, so the card can be reached and opened
+        // from the keyboard (Tab, then Enter/Space).
+        className="sr-only"
         onChange={(e) => {
           onPick(e.target.files?.[0] ?? null);
           // Reset so picking the same file again (after removing it, or
@@ -635,7 +686,11 @@ function FileSelectCard({
           type="button"
           aria-label={`Remove ${file.name}`}
           className="absolute right-2 top-2 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground dark:hover:bg-white/10"
-          onClick={onClear}
+          onClick={() => {
+            onClear();
+            // The button unmounts with the file: keep keyboard focus on the card.
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }}
         >
           <X className="h-4 w-4" />
         </button>
