@@ -88,6 +88,8 @@ export function StudyguidesPage() {
             <li key={sg.id}>
               <ProjectCard
                 to={`/lectures/${sg.id}?tab=studyguide`}
+                // Keeps "My study guides" highlighted in the sidebar (AppShell).
+                linkState={{ from: "studyguides" }}
                 lectureId={sg.id}
                 thumbnailKey={sg.thumbnailKey}
                 fallbackIcon={<FileText />}

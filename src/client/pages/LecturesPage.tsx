@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   listLectures,
@@ -77,8 +77,9 @@ import {
  *    visible to you is yours until sharing lands). "Shared with me"
  *    shows an empty state.
  *
- *  Freshness: while any project is uploading or processing, the list is
- *  re-fetched every 5 s (skipped while the tab is hidden) so status
+ *  Freshness: while any project is processing (or uploading, if the upload
+ *  was touched in the last 2 hours — older ones are abandoned), the list
+ *  is re-fetched every 5 s (skipped while the tab is hidden) so status
  *  badges clear on their own. */
 
 type Filter = "all" | "mine" | "shared";
@@ -102,7 +103,19 @@ const SORT_OPTIONS: { value: Sort; label: string }[] = [
 
 const POLL_MS = 5000;
 
-const isWorking = (l: Lecture) => l.status === "uploading" || l.status === "processing";
+/** An upload with no activity for this long was abandoned (tab closed
+ *  mid-upload): don't keep polling for it. */
+const STALE_UPLOAD_MS = 2 * 60 * 60 * 1000;
+
+const isWorking = (l: Lecture) =>
+  l.status === "processing" ||
+  (l.status === "uploading" && Date.now() - Date.parse(l.updatedAt) < STALE_UPLOAD_MS);
+
+/** A local rename a background refresh must not undo. `until` is the last
+ *  list request started before the PATCH succeeded (Infinity while it is
+ *  in flight): responses to requests up to it may still carry the old
+ *  name, so the override applies until a later-started request lands. */
+type PendingRename = { name: string; until: number };
 
 export function LecturesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -144,22 +157,30 @@ export function LecturesPage() {
   const [loadSettled, setLoadSettled] = useState(0);
   const reload = useCallback(() => setLoadNonce((n) => n + 1), []);
 
-  // Local edits a background refresh must not undo: a rename whose PATCH
-  // is still in flight, and rows deleted after the refresh started.
-  const pendingRenames = useRef(new Map<string, string>());
+  // Local edits a background refresh must not undo: renames the server
+  // may not reflect yet (see PendingRename), and rows deleted after the
+  // refresh started. `listSeq` numbers list requests in start order.
+  const pendingRenames = useRef(new Map<string, PendingRename>());
   const deletedIds = useRef(new Set<string>());
+  const listSeq = useRef(0);
 
   useEffect(() => {
     let alive = true;
+    const seq = ++listSeq.current;
     listLectures()
       .then((r) => {
         if (!alive) return;
+        // This request started after these renames were saved: it already
+        // carries the new names.
+        for (const [id, p] of pendingRenames.current) {
+          if (seq > p.until) pendingRenames.current.delete(id);
+        }
         setLectures(
           r.lectures
             .filter((l) => !deletedIds.current.has(l.id))
             .map((l) => {
-              const name = pendingRenames.current.get(l.id);
-              return name === undefined ? l : { ...l, name };
+              const p = pendingRenames.current.get(l.id);
+              return p === undefined ? l : { ...l, name: p.name };
             }),
         );
         setError(null);
@@ -204,14 +225,24 @@ export function LecturesPage() {
    *  PATCH. On failure, revert just this lecture's name and say so. */
   function applyRename(lecture: Lecture, name: string) {
     setActionError(null);
-    pendingRenames.current.set(lecture.id, name);
+    const pending: PendingRename = { name, until: Infinity };
+    pendingRenames.current.set(lecture.id, pending);
     setLectures(
       (ls) => ls?.map((l) => (l.id === lecture.id ? { ...l, name } : l)) ?? ls,
     );
-    renameLecture(lecture.id, name)
-      .catch((e: unknown) => {
+    renameLecture(lecture.id, name).then(
+      () => {
         // A newer rename of the same row supersedes this one.
-        if (pendingRenames.current.get(lecture.id) !== name) return;
+        if (pendingRenames.current.get(lecture.id) !== pending) return;
+        // A list request already in flight may have read the old name:
+        // keep the override until one started from now on lands, and
+        // start one (reload also drops the in-flight response).
+        pending.until = listSeq.current;
+        reload();
+      },
+      (e: unknown) => {
+        if (pendingRenames.current.get(lecture.id) !== pending) return;
+        pendingRenames.current.delete(lecture.id);
         setLectures(
           (ls) =>
             ls?.map((l) =>
@@ -219,12 +250,21 @@ export function LecturesPage() {
             ) ?? ls,
         );
         setActionError(`Couldn't rename “${lecture.name}”. ${friendlyError(e)}`);
-      })
-      .finally(() => {
-        if (pendingRenames.current.get(lecture.id) === name) {
-          pendingRenames.current.delete(lecture.id);
-        }
-      });
+      },
+    );
+  }
+
+  /** Row dialogs open from a menu item, so Radix has no trigger to give
+   *  focus back to and it would land on <body>. Return it to the row's
+   *  actions button, or — when the row is gone (deleted, or renamed out
+   *  of the current search) — to the search field. */
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  function restoreRowFocus(e: Event, lectureId: string) {
+    e.preventDefault();
+    const button = document.querySelector<HTMLElement>(
+      `[data-lecture-actions="${CSS.escape(lectureId)}"]`,
+    );
+    (button ?? searchInputRef.current)?.focus();
   }
 
   /** Derived: lectures after filter + search + sort. */
@@ -284,6 +324,7 @@ export function LecturesPage() {
           onSortChange={setSort}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          searchInputRef={searchInputRef}
           onNewProject={() => setDialogOpen(true)}
         />
       </PageHeader>
@@ -372,6 +413,7 @@ export function LecturesPage() {
           lecture={action.lecture}
           open={action.open}
           onOpenChange={(open) => !open && closeAction()}
+          onCloseAutoFocus={(e) => restoreRowFocus(e, action.lecture.id)}
           onSave={(name) => applyRename(action.lecture, name)}
         />
       )}
@@ -380,6 +422,7 @@ export function LecturesPage() {
           lecture={action.lecture}
           open={action.open}
           onOpenChange={(open) => !open && closeAction()}
+          onCloseAutoFocus={(e) => restoreRowFocus(e, action.lecture.id)}
           onDeleted={(id) => {
             deletedIds.current.add(id);
             setLectures((ls) => ls?.filter((l) => l.id !== id) ?? ls);
@@ -401,6 +444,7 @@ interface ToolbarProps {
   onSortChange: (s: Sort) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  searchInputRef: RefObject<HTMLInputElement | null>;
   onNewProject: () => void;
 }
 
@@ -413,9 +457,9 @@ function Toolbar({
   onSortChange,
   searchQuery,
   onSearchChange,
+  searchInputRef: inputRef,
   onNewProject,
 }: ToolbarProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label ?? "Sort";
 
   return (
@@ -634,6 +678,7 @@ function LectureActionsMenu({
           size="icon-sm"
           shape="pill"
           aria-label={`Actions for ${lecture.name}`}
+          data-lecture-actions={lecture.id}
           className="text-muted-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
           <MoreVertical />
@@ -661,11 +706,13 @@ function RenameLectureDialog({
   lecture,
   open,
   onOpenChange,
+  onCloseAutoFocus,
   onSave,
 }: {
   lecture: Lecture;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus: (e: Event) => void;
   onSave: (name: string) => void;
 }) {
   const [draft, setDraft] = useState(lecture.name);
@@ -694,7 +741,7 @@ function RenameLectureDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>Rename project</DialogTitle>
           <DialogDescription>Enter a new name for this project.</DialogDescription>
@@ -744,11 +791,13 @@ function DeleteLectureDialog({
   lecture,
   open,
   onOpenChange,
+  onCloseAutoFocus,
   onDeleted,
 }: {
   lecture: Lecture;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus: (e: Event) => void;
   onDeleted: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -781,7 +830,7 @@ function DeleteLectureDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>Delete project?</DialogTitle>
           <DialogDescription>

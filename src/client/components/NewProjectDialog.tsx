@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -640,6 +640,11 @@ function FileSelectCard({
   disabled: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // The input is named by the visible title and described by the file
+  // name / hint and any refusal, so AT hears what's picked and why not.
+  const titleId = useId();
+  const detailId = useId();
+  const problemId = useId();
   return (
     // The remove button sits OUTSIDE the <label>: inside it, a <button> would
     // become the label's labeled control and every click on the card would
@@ -668,16 +673,24 @@ function FileSelectCard({
         >
           {icon}
         </span>
-        <span className="text-sm font-semibold text-foreground">{title}</span>
+        <span id={titleId} className="text-sm font-semibold text-foreground">
+          {title}
+        </span>
         {file ? (
-          <span className="line-clamp-1 max-w-full text-xs text-muted-foreground">
+          <span id={detailId} className="line-clamp-1 max-w-full text-xs text-muted-foreground">
             <span className="text-foreground">{file.name}</span>
             <span className="tabular-nums"> · {(file.size / (1024 * 1024)).toFixed(1)} MB</span>
           </span>
         ) : (
-          <span className="meta">{hint}</span>
+          <span id={detailId} className="meta">
+            {hint}
+          </span>
         )}
-        {problem && <span className="text-xs text-destructive-text">{problem}</span>}
+        {problem && (
+          <span id={problemId} role="alert" className="text-xs text-destructive-text">
+            {problem}
+          </span>
+        )}
 
         {progress !== null && (
           <Progress
@@ -695,7 +708,8 @@ function FileSelectCard({
           type="file"
           accept={accept}
           className="sr-only"
-          aria-label={`Choose ${title.toLowerCase()} file`}
+          aria-labelledby={titleId}
+          aria-describedby={problem ? `${detailId} ${problemId}` : detailId}
           onChange={(e) => {
             onPick(e.target.files?.[0] ?? null);
             // Reset so picking the same file again (after removing it, or

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { AlertCircle, ArrowLeft, Download, FileText, LayoutList, Loader2, LocateFixed, Sparkles } from "lucide-react";
 import {
@@ -90,12 +90,26 @@ export function LectureViewerPage() {
   // My study guides list can deep-link straight into the guide.
   const [searchParams, setSearchParams] = useSearchParams();
   const view: View = searchParams.get("tab") === "studyguide" ? "studyguide" : "slides";
+  // Below lg both tabs scroll the root: remember where each tab was left
+  // and restore it on return (the top on a tab's first visit).
+  const tabScroll = useRef<Partial<Record<View, number>>>({});
   const setView = (v: View) => {
+    if (v === view) return;
+    const root = rootRef.current;
+    if (!isLg && root) tabScroll.current[view] = root.scrollTop;
     const next = new URLSearchParams(searchParams);
     if (v === "studyguide") next.set("tab", "studyguide");
     else next.delete("tab");
     setSearchParams(next, { replace: true });
   };
+  const shownView = useRef(view);
+  useLayoutEffect(() => {
+    if (shownView.current === view) return;
+    shownView.current = view;
+    const root = rootRef.current;
+    if (!root || isLg) return;
+    root.scrollTop = tabScroll.current[view] ?? 0;
+  }, [view, isLg]);
 
   // The study guide mounts on first visit and then stays mounted.
   const [sgMounted, setSgMounted] = useState(view === "studyguide");
@@ -103,6 +117,9 @@ export function LectureViewerPage() {
     if (view === "studyguide") setSgMounted(true);
   }, [view]);
   const showStudyguide = sgMounted || view === "studyguide";
+  // Built once per lecture: the viewer re-renders on every playback tick,
+  // and the (usually hidden) study guide must not re-render with it.
+  const studyguideEl = useMemo(() => (id ? <StudyguidePanel lectureId={id} /> : null), [id]);
 
   // ---- Data fetch + polling ---------------------------------------------
   useEffect(() => {
@@ -177,12 +194,17 @@ export function LectureViewerPage() {
   // Below lg the root scrolls under a sticky header + sticky video; tell
   // scrollWithin (and the transcript follow) how much of the top that
   // covers. At lg the columns scroll on their own, with nothing over them.
+  // The sticky video also sits right under the header's measured height
+  // (the class's top-11 / md:top-14 until then), so a phone error line
+  // under the header bar pushes it down instead of covering it.
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     const update = () => {
-      const covered = isLg ? 0 : (headerRef.current?.offsetHeight ?? 0) + (stickyRef.current?.offsetHeight ?? 0);
+      const headerH = headerRef.current?.offsetHeight ?? 0;
+      const covered = isLg ? 0 : headerH + (stickyRef.current?.offsetHeight ?? 0);
       root.dataset.stickyOffset = String(covered);
+      if (stickyRef.current) stickyRef.current.style.top = isLg || !headerH ? "" : `${headerH}px`;
     };
     update();
     if (typeof ResizeObserver === "undefined") return;
@@ -342,7 +364,7 @@ export function LectureViewerPage() {
 
       {showStudyguide && (
         <div className={cn("lg:min-h-0 lg:flex-1 lg:overflow-y-auto", view !== "studyguide" && "hidden")}>
-          <StudyguidePanel lectureId={id} />
+          {studyguideEl}
         </div>
       )}
 
@@ -357,7 +379,9 @@ export function LectureViewerPage() {
           ref={stickyRef}
           className="sticky top-11 z-10 flex flex-col border-b bg-background/95 backdrop-blur md:top-14 md:flex-row md:items-center md:gap-4 md:p-3 lg:static lg:h-full lg:min-h-0 lg:flex-col lg:items-stretch lg:gap-3 lg:border-b-0 lg:border-r lg:bg-background lg:p-4 lg:backdrop-blur-none"
         >
-          <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-black md:w-[min(50%,calc(28svh*16/9))] md:rounded-lg lg:w-full lg:rounded-xl">
+          {/* Phones: full-bleed, but at most 40% of the viewport tall
+              (landscape), centred, so the cards stay visible under it. */}
+          <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-black max-md:mx-auto max-md:w-[min(100%,calc(40svh*16/9))] md:w-[min(50%,calc(28svh*16/9))] md:rounded-lg lg:w-full lg:rounded-xl">
             <VideoPlayer
               videoRef={setVideoEl}
               src={assetUrl(id, project.videoFileName ?? "video.mp4")}
@@ -388,10 +412,12 @@ export function LectureViewerPage() {
                 note={note}
                 pdfPageCount={project.pdfPageCount}
                 isActive={activeIndex === i}
-                activeWord={playback.activeWord}
+                // Only the active card gets the (per-tick) word, so the
+                // memoized cards around it skip the re-render.
+                activeWord={activeIndex === i ? playback.activeWord : null}
                 onSeekTo={onSeekTo}
                 annotationsVisible={annotationsVisible}
-                autoScroll={autoScroll}
+                autoScroll={autoScroll && view === "slides"}
               />
             </div>
           ))}
@@ -454,6 +480,8 @@ function ViewerHeader({
                 {subtitle && (
                   <p className="meta truncate" title={subtitleTitle || undefined}>
                     {subtitle}
+                    {/* The hover breakdown, for screen readers too. */}
+                    {subtitleTitle && <span className="sr-only"> ({subtitleTitle})</span>}
                   </p>
                 )}
               </>
@@ -495,7 +523,7 @@ function ViewerHeader({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={download.tooltip}
+                aria-label={download.error ? `${download.tooltip}. ${download.error}` : download.tooltip}
                 onClick={download.onClick}
                 disabled={download.busy}
                 className={cn(download.error && "text-destructive-text")}
@@ -505,6 +533,18 @@ function ViewerHeader({
             </Tip>
           )}
         </div>
+      )}
+      {/* Below md a failed download is spelled out under the bar (tooltips
+          don't open on touch). Part of the sticky header, so the sticky
+          video moves down with it. */}
+      {tabs && download?.error && (
+        <p
+          role="alert"
+          className="flex items-start gap-1.5 border-b bg-card/85 px-3 py-1.5 text-xs text-destructive-text backdrop-blur-xl md:hidden"
+        >
+          <AlertCircle className="mt-px size-3.5 shrink-0" aria-hidden />
+          {download.error}
+        </p>
       )}
     </div>
   );

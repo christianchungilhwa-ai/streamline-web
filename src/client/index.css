@@ -77,13 +77,14 @@
   --destructive-foreground: #ffffff;
   --border: rgba(0, 0, 0, 0.10);
   --input: rgba(0, 0, 0, 0.10);
-  --ring: #38bdf8;                  /* focus ring follows brand */
+  --ring: #0284c7;                  /* sky-600 — the sky-400 fill is ~2:1 on white; this is >=3:1 */
   --radius: 0.75rem;                /* 12px — matches Claraity --radius-md */
   /* Brand-colored TEXT (links, active nav, chips) — sky-700 passes AA on
-     white; the raw sky fill does not. */
+     white; the raw sky fill does not. Semantic text colors are chosen to
+     keep >=4.5:1 on their own /10–/15 tints over white and the page bg. */
   --brand-text: #0369a1;
-  --success: #15803d;
-  --warning: #c2410c;
+  --success: #166534;               /* green-800 (green-700 was ~3.9:1 on its /15 tint) */
+  --warning: #9a3412;               /* orange-800 */
   --destructive-text: #c81e1e;
   --highlight: rgba(250, 204, 21, 0.38);
   --segment-thumb: #ffffff;
@@ -232,13 +233,16 @@ html, body, #root {
   from { opacity: 1; }
   to   { opacity: 0; }
 }
+/* Animate only opacity + the `scale` property: centring comes from the
+   -translate-x/y-1/2 utilities (the CSS `translate` property), so a
+   transform: translate() here would double the offset mid-animation. */
 @keyframes dialog-content-in {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; scale: 0.96; }
+  to   { opacity: 1; scale: 1; }
 }
 @keyframes dialog-content-out {
-  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  to   { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  from { opacity: 1; scale: 1; }
+  to   { opacity: 0; scale: 0.96; }
 }
 
 .animate-dialog-overlay-in {
@@ -406,6 +410,11 @@ html, body, #root {
 }
 .notes-prose .notes-hl-red { color: var(--destructive-text); font-weight: 600; }
 
+/* The wrapper box owns the table's outer margin; out-specify the
+   `.studyguide-prose table` / `.notes-prose table` margins above. */
+.studyguide-prose .prose-table-wrap table,
+.notes-prose .prose-table-wrap table { margin: 0; }
+
 /* ---- Studyguide structured visuals ----
    Styling for the resolved-studyguide components (DrawioDiagram +
    SgPairTabs). Mirrors the Mac app's StudyguideView CSS vocabulary
@@ -549,8 +558,22 @@ html, body, #root {
     --muted: #f3f4f6;
     --card: #ffffff;
     --primary: #0369a1;
+    /* Light semantic tokens (match :root) so dark-theme values don't
+       print as pale text on white. */
+    --brand-text: #0369a1;
+    --success: #166534;
+    --warning: #9a3412;
+    --destructive-text: #c81e1e;
+    --highlight: rgba(250, 204, 21, 0.38);
     background: #ffffff;
     color: var(--foreground);
+  }
+  /* Drop the on-screen 7rem column floor so wide tables fit the page
+     width instead of being clipped; long words wrap inside cells. */
+  body.sg-printing .sg-print-root th,
+  body.sg-printing .sg-print-root td {
+    min-width: 0;
+    word-break: break-word;
   }
   body.sg-printing .sg-print-root figure,
   body.sg-printing .sg-print-root table,

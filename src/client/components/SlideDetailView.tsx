@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Video, VideoOff, ArrowDownUp, Sparkles, Play, ChevronDown, ChevronUp } from "lucide-react";
 import type { SlideNote, TranscriptWord } from "@/lib/types";
 import { assetUrl } from "@/lib/api";
@@ -53,8 +53,11 @@ const countWords = (text: string) => text.trim().split(/\s+/).filter(hasSpeech).
  * Layout follows the card's own width (container query): one column when
  * narrow, image | notes + transcript side by side from @2xl, with the
  * image sticky while the transcript scrolls on lg.
+ *
+ * Memoized: the viewer re-renders on every playback tick, but only hands
+ * the spoken word to the active card, so the others skip the render.
  */
-export function SlideDetailView({
+export const SlideDetailView = memo(function SlideDetailView({
   lectureId,
   note,
   pdfPageCount,
@@ -140,18 +143,18 @@ export function SlideDetailView({
     });
   };
 
-  // Stable seek handler for the memoized children below: the viewer
-  // passes a fresh closure on every render (every spoken word).
+  // Stable seek handler for the memoized children below, even if the
+  // viewer ever passes a fresh closure.
   const seekRef = useRef(onSeekTo);
   useLayoutEffect(() => {
     seekRef.current = onSeekTo;
   });
   const seek = useCallback((t: number) => seekRef.current(t), []);
 
-  // Every card re-renders on each spoken word; only the active one's
-  // transcript actually changes, and the notes never do.
+  // Only the active card's transcript follows the spoken word, and never
+  // while it is clamped ("Show less"): the word may be cut off below.
   const panelWord = isActive ? activeWord : null;
-  const follow = autoScroll && isActive;
+  const follow = autoScroll && isActive && !clamp;
   const transcriptPanel = useMemo(
     () => <TranscriptPanel note={note} activeWord={panelWord} follow={follow} onSeekTo={seek} />,
     [note, panelWord, follow, seek],
@@ -165,7 +168,9 @@ export function SlideDetailView({
     <article
       aria-labelledby={headingId}
       className={cn(
-        "@container card-surface scroll-mt-4 p-4 transition-shadow md:p-5",
+        // isolate: the image overlay's z-index stays inside the card, under
+        // the viewer's sticky video.
+        "@container card-surface isolate scroll-mt-4 p-4 transition-shadow md:p-5",
         isActive && "ring-2 ring-primary/60",
         !note.wasPresented && "opacity-80",
       )}
@@ -317,7 +322,7 @@ export function SlideDetailView({
       </div>
     </article>
   );
-}
+});
 
 /** The slide image. When the slide was presented, the whole image is a
  *  button that seeks the video to `at`, with a play badge on hover /

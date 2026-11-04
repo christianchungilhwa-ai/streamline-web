@@ -1,7 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef } from "react";
 import type { SlideNote, TranscriptVisit, TranscriptWord } from "@/lib/types";
 import { cn, getScrollParent, scrollWithin } from "@/lib/utils";
-import { alignDisplayTokens, hasSpeech, sentenceSpans, splitParagraphs, type SentenceSpan } from "@/lib/transcriptTokens";
+import {
+  alignDisplayTokens,
+  hasSpeech,
+  sentenceSpans,
+  splitParagraphs,
+  wordTokens,
+  type SentenceSpan,
+} from "@/lib/transcriptTokens";
 
 export interface TranscriptPanelProps {
   note: SlideNote;
@@ -26,12 +33,14 @@ type VisitModel =
   | { kind: "sentences"; visit: TranscriptVisit; sentences: SentenceSpan[] };
 
 /** Visit → paragraphs of clickable tokens (punctuation restored from the
- *  visit text), or sentence spans when the words and text don't align. */
+ *  visit text; the words' own text when the two don't align), or
+ *  estimated sentence spans when the visit has no timed words. */
 function buildVisit(visit: TranscriptVisit): VisitModel {
   const words = visit.words ?? [];
-  const aligned = words.length ? alignDisplayTokens(visit.text, words) : null;
-  if (!aligned) return { kind: "sentences", visit, sentences: sentenceSpans(visit) };
-  const { display, owner } = aligned;
+  if (!words.some((w) => hasSpeech(String(w.text ?? "")))) {
+    return { kind: "sentences", visit, sentences: sentenceSpans(visit) };
+  }
+  const { display, owner } = alignDisplayTokens(visit.text, words) ?? wordTokens(words);
   const paragraphs = splitParagraphs(words, display).map((indices) => {
     const tokens: Token[] = [];
     for (const j of indices) {

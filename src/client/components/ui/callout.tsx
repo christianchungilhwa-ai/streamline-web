@@ -33,7 +33,7 @@ export function Callout({ tone = "danger", icon, title, action, onDismiss, class
       {icon}
       <div className="min-w-0 flex-1">
         {title && <div className="font-medium">{title}</div>}
-        {children && <div className={cn(title && "mt-0.5 text-xs opacity-85")}>{children}</div>}
+        {children && <div className={cn(title && "mt-0.5 text-xs")}>{children}</div>}
         {action && <div className="mt-2">{action}</div>}
       </div>
       {onDismiss && (

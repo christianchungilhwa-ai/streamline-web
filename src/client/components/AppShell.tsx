@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Outlet, useLocation, Link } from "react-router-dom";
 import {
   AlertCircle,
@@ -37,6 +37,9 @@ import {
 /** sessionStorage key for the user's explicit collapse choice. */
 const COLLAPSE_KEY = "streamline-sidebar-collapsed";
 
+/** Below md the sidebar is a slide-in drawer. */
+const MOBILE_QUERY = "(max-width: 767px)";
+
 function readCollapsedPref(): boolean | null {
   try {
     const v = window.sessionStorage.getItem(COLLAPSE_KEY);
@@ -66,7 +69,7 @@ export function AppShell() {
   const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
-  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isMobile = useMediaQuery(MOBILE_QUERY);
   const isNarrow = useMediaQuery("(max-width: 1279px)");
   const [collapsedPref, setCollapsedPrefState] = useState<boolean | null>(readCollapsedPref);
 
@@ -84,15 +87,37 @@ export function AppShell() {
     setMobileOpen(false);
   }, [location.pathname, location.search]);
 
-  // Escape closes the open drawer.
+  // Escape closes the open drawer — unless something inside it (a menu, a
+  // tooltip) already handled that Escape to close itself.
   useEffect(() => {
     if (!mobileOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileOpen(false);
+      if (e.key === "Escape" && !e.defaultPrevented) setMobileOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileOpen]);
+
+  // Drawer focus management. While it is open the top bar and <main> are
+  // inert (see below), focus starts on its close button, and on close it
+  // returns to the menu button — when it was inside the drawer, or was
+  // dropped to <body> as the drawer went inert / the backdrop was tapped.
+  // Not when the viewport grew past md: the drawer is the static sidebar
+  // then, and focus stays where it is.
+  const drawerOpen = isMobile && mobileOpen;
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    closeButtonRef.current?.focus();
+    return () => {
+      if (!window.matchMedia(MOBILE_QUERY).matches) return;
+      const active = document.activeElement;
+      const lost = !active || active === document.body;
+      if (lost || asideRef.current?.contains(active)) menuButtonRef.current?.focus();
+    };
+  }, [drawerOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -172,8 +197,12 @@ export function AppShell() {
     <TooltipProvider>
       <div className="flex h-full flex-col md:flex-row">
         {/* Mobile top bar — menu button + page title + logo (md:hidden). */}
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/85 px-2 backdrop-blur-xl md:hidden">
+        <header
+          inert={drawerOpen}
+          className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/85 px-2 backdrop-blur-xl md:hidden"
+        >
           <Button
+            ref={menuButtonRef}
             variant="ghost"
             size="icon"
             onClick={() => setMobileOpen(true)}
@@ -205,6 +234,7 @@ export function AppShell() {
 
         {/* Sidebar — static/collapsible on desktop, slide-in drawer on mobile. */}
         <aside
+          ref={asideRef}
           aria-label="Sidebar"
           inert={isMobile && !mobileOpen}
           className={cn(
@@ -242,6 +272,7 @@ export function AppShell() {
             )}
             {isMobile ? (
               <Button
+                ref={closeButtonRef}
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => setMobileOpen(false)}
@@ -330,7 +361,7 @@ export function AppShell() {
           <AccountMenu user={user} collapsed={effCollapsed} theme={theme} onThemeChange={setTheme} />
         </aside>
 
-        <main className="min-w-0 flex-1 overflow-auto">
+        <main inert={drawerOpen} className="min-w-0 flex-1 overflow-auto">
           <PageTitleContext.Provider value={setPageTitle}>
             <Outlet />
           </PageTitleContext.Provider>
@@ -369,11 +400,13 @@ function AccountMenu({
         <Tip side="right" label="Account" disabled={!collapsed}>
           <DropdownMenuTrigger asChild>
             {collapsed ? (
+              // Inside <Tip>, the tooltip's data-state overwrites the menu
+              // trigger's, so the open state is styled off aria-expanded.
               <button
                 type="button"
                 aria-label="Account"
                 className={cn(
-                  "flex size-10 items-center justify-center rounded-lg transition-colors hover:bg-accent data-[state=open]:bg-accent",
+                  "flex size-10 items-center justify-center rounded-lg transition-colors hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent",
                   ringClass,
                 )}
               >
