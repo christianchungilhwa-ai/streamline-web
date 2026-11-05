@@ -372,7 +372,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
       if (uploadAbortRef.current === controller) uploadAbortRef.current = null;
     }
     setDeckIncomplete(false);
-    setDeckNote(`“${file.name}” uploaded — confirm the slide region to start.`);
+    setDeckNote(`“${file.name}” uploaded. Confirm the slide region to begin processing.`);
     setPhase("roi");
   }
 
@@ -380,7 +380,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
     setDeck(null);
     setDeckRejected(null);
     setDeckIncomplete(false);
-    setDeckNote("No deck — confirm the slide region to build the deck from the recording.");
+    setDeckNote("Deck removed. Confirm the slide region, and the deck will be reconstructed from the recording.");
   }
 
   // Back out during the ROI step: best-effort delete the un-started job so
@@ -420,8 +420,8 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
           <DialogTitle>{inRoi ? "Confirm slide region" : "New project"}</DialogTitle>
           {!inRoi && (
             <DialogDescription>
-              Add a lecture recording and, if you have it, its slide deck — Streamline lines them up
-              and writes notes for every slide.
+              Upload a lecture recording and, optionally, its slide deck. Streamline aligns the
+              slides with the recording and generates notes for each one.
             </DialogDescription>
           )}
         </DialogHeader>
@@ -430,8 +430,8 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
           <>
             {extractDeck && (
               <Callout tone="info" icon={<Sparkles className="text-primary" />}>
-                The slide deck will be built from this region of the recording — frame it tightly
-                around the slides.
+                The slide deck will be reconstructed from this region of the recording. For the best
+                result, frame it closely around the slides.
               </Callout>
             )}
             {deckRejected && (
@@ -451,7 +451,7 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
                     </Button>
                     <Button type="button" size="sm" variant="ghost" onClick={dropDeckAndExtract}>
                       <Sparkles />
-                      Remove deck — extract slides from the recording
+                      Remove deck and use the recording instead
                     </Button>
                   </div>
                 }
@@ -544,8 +544,9 @@ export function NewProjectDialog({ open, onOpenChange }: NewProjectDialogProps) 
                 icon={<Sparkles className="text-primary" />}
                 title="Extract & Create Slide deck from the Video Recording"
               >
-                No deck? Streamline builds one from the slides shown in the recording (desktop,
-                websites and other apps are left out). Download it as a PDF once processing finishes.
+                If no deck is attached, Streamline reconstructs it from the slides presented in the
+                recording, excluding other on-screen content such as the desktop or browser windows.
+                The deck will be available as a PDF once processing is complete.
               </Callout>
             )}
 
