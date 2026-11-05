@@ -58,8 +58,10 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        // Centered sheet, inset 1rem from the screen edges on phones.
-        "fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 gap-4",
+        // Centered sheet, inset 1rem from the screen edges on phones. The one
+        // column may shrink below its content, so a wide child (a thumbnail
+        // strip) scrolls inside itself instead of widening the dialog.
+        "fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-4",
         "rounded-2xl border border-border bg-card p-5 shadow-overlay sm:p-6",
         "max-h-[calc(100dvh-2rem)] overflow-y-auto",
         // Enter/exit anim — keyframes are in index.css.
